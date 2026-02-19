@@ -272,7 +272,7 @@ export default function BookReaderPage() {
 
   const fetchAllData = async () => {
     try {
-      const bookRes = await fetch(`/api/books/${bookId}`);
+      const bookRes = await fetch(`/api/proxy/api/books/${bookId}`);
       if (bookRes.status === 404) {
         // Book not found -> redirect to home
         try { router.push('/'); } catch (err) { console.warn('redirect failed', err); }
@@ -283,7 +283,7 @@ export default function BookReaderPage() {
         setBook(bookData.data);
       }
 
-      const topicsRes = await fetch(`/api/books/${bookId}/topics`);
+      const topicsRes = await fetch(`/api/proxy/api/books/${bookId}/topics`);
       const topicsData = await topicsRes.json();
       if (topicsData.success) {
         setTopics(topicsData.data);
@@ -298,7 +298,7 @@ export default function BookReaderPage() {
 
   const fetchHighlights = async () => {
     try {
-      const response = await fetch(`/api/books/${bookId}/highlights`);
+      const response = await fetch(`/api/proxy/api/books/${bookId}/highlights`);
       const data = await response.json();
       if (data.success) {
         setHighlights(data.data);
@@ -352,7 +352,7 @@ export default function BookReaderPage() {
     }
 
     try {
-      const response = await fetch(`/api/books/${bookId}/highlights`, {
+      const response = await fetch(`/api/proxy/api/books/${bookId}/highlights`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -396,7 +396,7 @@ export default function BookReaderPage() {
     }
 
     try {
-      const response = await fetch(`/api/books/${bookId}/highlights?id=${highlightId}`, {
+      const response = await fetch(`/api/proxy/api/books/${bookId}/highlights?id=${highlightId}`, {
         method: 'DELETE'
       });
 
@@ -490,7 +490,7 @@ export default function BookReaderPage() {
   // Bookmark Functions
   const fetchBookmarks = async () => {
     try {
-      const response = await fetch(`/api/books/${bookId}/bookmarks`);
+      const response = await fetch(`/api/proxy/api/books/${bookId}/bookmarks`);
       const data = await response.json();
       if (data.success) {
         setBookmarks(data.data);
@@ -515,7 +515,7 @@ export default function BookReaderPage() {
 
   const toggleBookmark = async (pageIndex) => {
     try {
-      const response = await fetch(`/api/books/${bookId}/bookmarks`, {
+      const response = await fetch(`/api/proxy/api/books/${bookId}/bookmarks`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -552,7 +552,7 @@ export default function BookReaderPage() {
     }
 
     try {
-      const response = await fetch(`/api/books/${bookId}/bookmarks?id=${bookmarkId}`, {
+      const response = await fetch(`/api/proxy/api/books/${bookId}/bookmarks?id=${bookmarkId}`, {
         method: 'DELETE'
       });
 
@@ -845,7 +845,7 @@ export default function BookReaderPage() {
 
         // First, fetch and add topic-level pages (where subtopic_id is NULL)
         try {
-          const topicPagesRes = await fetch(`/api/books/${bookId}/topics/${topic.id}/pages`);
+          const topicPagesRes = await fetch(`/api/proxy/api/books/${bookId}/topics/${topic.id}/pages`);
           const topicPagesData = await topicPagesRes.json();
           
           if (topicPagesData.success && topicPagesData.data && topicPagesData.data.length > 0) {
@@ -863,7 +863,7 @@ export default function BookReaderPage() {
         }
 
         // Then fetch subtopics for this topic
-        const subtopicsRes = await fetch(`/api/books/${bookId}/topics/${topic.id}/subtopics`);
+        const subtopicsRes = await fetch(`/api/proxy/api/books/${bookId}/topics/${topic.id}/subtopics`);
         const subtopicsData = await subtopicsRes.json();
 
         if (subtopicsData.success && subtopicsData.data.length > 0) {
@@ -879,7 +879,7 @@ export default function BookReaderPage() {
             });
 
             // Fetch pages for this subtopic
-            const pagesRes = await fetch(`/api/books/${bookId}/topics/${topic.id}/subtopics/${subtopic.id}/pages`);
+            const pagesRes = await fetch(`/api/proxy/api/books/${bookId}/topics/${topic.id}/subtopics/${subtopic.id}/pages`);
             const pagesData = await pagesRes.json();
 
             if (pagesData.success && pagesData.data.length > 0) {
