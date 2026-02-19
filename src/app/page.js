@@ -40,8 +40,7 @@ export default function Home() {
 
   const filteredBooks = books.filter(book =>
     book.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    book.author_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    book.subject_name.toLowerCase().includes(searchQuery.toLowerCase())
+    book.author_name.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   // Soft gradient colors for book cards
