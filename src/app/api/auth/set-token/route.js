@@ -5,7 +5,7 @@ import { generateToken } from '@/lib/auth';
 
 // 3001 wala JWT secret — dono projects mein same hona chahiye
 const BRIDGE_SECRET = process.env.BRIDGE_SECRET || 'my-3001-jwt-secret';
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-this';
+const JWT_SECRET = process.env.JWT_SECRET || 'my-3001-jwt-secret';
 
 export async function POST(request) {
   try {
