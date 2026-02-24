@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import Mark from 'mark.js';
 
@@ -12,6 +12,7 @@ export default function BookReaderPage() {
   
   const API_BASE = process.env.NEXT_PUBLIC_API_BASE || '';
 
+  
 
   const [book, setBook] = useState(null);
   const [topics, setTopics] = useState([]);
@@ -64,11 +65,14 @@ export default function BookReaderPage() {
   const A4_WIDTH = 820;
   const A4_HEIGHT = 1300;
   const [maxPageHeight, setMaxPageHeight] = useState(A4_HEIGHT);
-  const [fontSizeRef, setFontSizeRef] = useState(fontSize);
+  const prevFontSizeRef = useRef(fontSize); // Track previous font size with ref (more reliable)
+  const globalMaxHeightRef = useRef(0); // Start at 0 so first measurement sets the correct height
   // Font size slider bounds
   const FONT_MIN = 10; // allow sizes below 50%
   const FONT_MAX = 200;
   const FONT_STEP = 5;
+
+  const [token,setToken] = useState(null);
 
   // Compute slider fill percent for UI and update CSS custom property for font scaling
   const sliderFill = Math.round(((fontSize - FONT_MIN) / (FONT_MAX - FONT_MIN)) * 100);
@@ -97,18 +101,74 @@ export default function BookReaderPage() {
     return 1;
   };
 
+
+
+  // embed/book/[bookId]/page.jsx ke andar — existing useEffects ke saath
+// embed/book/[bookId]/page.jsx mein
+// Existing useEffects ke saath yeh bhi hona chahiye
+
+// Component ke andar, baaki states ke saath
+const searchParams = useSearchParams();
+
+// Existing useEffects ke saath yeh add karo
+useEffect(() => {
+  const token = searchParams.get('token');
+  if (!token) return;
+  setToken(token);
+
+  console.log('Token found in URL:', token); // ← CHECK
+
+  const authenticate = async () => {
+    try {
+      const res = await fetch('/api/auth/set-token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token }),
+        credentials: 'include',
+      });
+
+      const data = await res.json();
+      console.log('Set token response:', data); // ← CHECK
+
+  
+
+      if (data.success) {
+          localStorage.setItem('bookTokenData', JSON.stringify({
+          user: data.user,
+          token: data.token,
+          storedAt: new Date().toISOString(),
+  }));
+
+  console.log('✅ bookTokenData saved to localStorage');
+  
+  fetchHighlights();
+  fetchBookmarks();
+      }
+    } catch (err) {
+      console.error('Auth error:', err);
+    }
+  };
+
+  authenticate();
+}, []); // ← Sirf ek baar run hoga on mount
+
+
+
+
   // Update CSS custom property for font scaling
   useEffect(() => {
     document.documentElement.style.setProperty('--font-scale', fontSize / 100);
     
-    // Reset maxPageHeight when font size changes to allow recalculation
-    if (fontSize !== fontSizeRef) {
+    // Reset maxPageHeight AND globalMaxHeightRef when font size changes to allow recalculation
+    if (fontSize !== prevFontSizeRef.current) {
+      globalMaxHeightRef.current = 0; // Reset to 0 to allow fresh measurement
       setMaxPageHeight(A4_HEIGHT);
-      setFontSizeRef(fontSize);
+      prevFontSizeRef.current = fontSize; // Update ref AFTER comparison
     }
   }, [fontSize]);
 
   // Synchronize page heights - calculate max height and apply to all pages
+  // IMPORTANT: Height only INCREASES, never decreases (except on font change)
   useEffect(() => {
     if (!bookOpened) return;
 
@@ -127,29 +187,36 @@ export default function BookReaderPage() {
         // Force reflow
         void document.body.offsetHeight;
 
-        // Start with 0 to get true content height based on font size
-        let maxHeight = 0;
+        // Start with current global max (so we only increase)
+        let measuredMax = 0;
 
         // Second pass: measure all natural heights
         allPageElements.forEach(pageEl => {
           const pageHeight = pageEl.scrollHeight;
-          if (pageHeight > maxHeight) {
-            maxHeight = pageHeight;
+          if (pageHeight > measuredMax) {
+            measuredMax = pageHeight;
           }
         });
 
         // Apply minimum A4 height if content is too small
-        maxHeight = Math.max(maxHeight, A4_HEIGHT * (fontSize / 100));
+        measuredMax = Math.max(measuredMax, A4_HEIGHT * (fontSize / 100));
 
         // Round up to avoid fractional pixels
-        maxHeight = Math.ceil(maxHeight);
+        measuredMax = Math.ceil(measuredMax);
 
-        // Set the calculated max height (can increase or decrease with font size)
-        setMaxPageHeight(maxHeight);
+        // KEY: Only update if new height is GREATER than stored global max
+        // This ensures height never shrinks when flipping to smaller pages
+        if (measuredMax > globalMaxHeightRef.current) {
+          globalMaxHeightRef.current = measuredMax;
+        }
+
+        // Always use the global max (largest page ever measured)
+        const finalHeight = globalMaxHeightRef.current;
+        setMaxPageHeight(finalHeight);
 
         // Third pass: apply the max height to all pages immediately
         allPageElements.forEach(pageEl => {
-          pageEl.style.height = `${maxHeight}px`;
+          pageEl.style.height = `${finalHeight}px`;
         });
       });
     };
@@ -299,20 +366,30 @@ export default function BookReaderPage() {
     }
   };
 
-  const fetchHighlights = async () => {
-    try {
-      const response = await fetch(`${API_BASE}/api/books/${bookId}/highlights`);
-      const data = await response.json();
-      if (data.success) {
-        setHighlights(data.data);
-      } else if (data.message === 'Unauthorized') {
-        // User not logged in - that's okay, highlights just won't show
-        console.log('User not logged in - highlights disabled');
-      }
-    } catch (error) {
-      console.error('Error fetching highlights:', error);
+const fetchHighlights = async () => {
+  try {
+    // ✅ localStorage se token lo
+    const bookData = JSON.parse(localStorage.getItem('bookTokenData') || '{}');
+    const token = bookData?.token;
+
+    const response = await fetch(`${API_BASE}/api/books/${bookId}/highlights`, {
+      headers: {
+        ...(token ? { 'x-book-token': token } : {}), // ← token header mein
+      },
+      credentials: 'include', // cookie bhi saath jaayegi
+    });
+
+    const data = await response.json();
+    if (data.success) {
+      setHighlights(data.data);
+    } else if (data.message === 'Unauthorized') {
+      console.log('User not logged in - highlights disabled');
     }
-  };
+  } catch (error) {
+    console.error('Error fetching highlights:', error);
+  }
+};
+
 
   const handleTextSelection = () => {
     // Small delay removed here; callers will debounce as needed.
@@ -348,134 +425,142 @@ export default function BookReaderPage() {
     }
   };
 
-  const saveHighlight = async () => {
-    if (!highlightTitle.trim() || !selectedText) {
-      alert('Please enter a title for the highlight');
-      return;
+const saveHighlight = async () => {
+  if (!highlightTitle.trim() || !selectedText) {
+    alert('Please enter a title for the highlight');
+    return;
+  }
+
+  try {
+    // ✅ localStorage se token lo
+    const bookData = JSON.parse(localStorage.getItem('bookTokenData') || '{}');
+    const token = bookData?.token;
+
+    const response = await fetch(`${API_BASE}/api/books/${bookId}/highlights`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { 'x-book-token': token } : {}),
+      },
+      credentials: 'include',
+      body: JSON.stringify({
+        title: highlightTitle,
+        page_index: colorPickerPosition.pageIndex || currentPageIndex,
+        selected_text: selectedText,
+        color: selectedColor
+      })
+    });
+
+    const data = await response.json();
+
+    if (data.success) {
+      setHighlights([...highlights, data.data]);
+      setShowColorPicker(false);
+      setSelectedText('');
+      setHighlightTitle('');
+      setSelectedColor('#FFFF00');
+      window.getSelection().removeAllRanges();
+    } else if (data.message === 'Unauthorized') {
+      alert('Please login to save highlights');
+      setShowColorPicker(false);
+      setSelectedText('');
+      setHighlightTitle('');
+      window.getSelection().removeAllRanges();
+    } else {
+      alert(data.message || 'Failed to save highlight');
     }
+  } catch (error) {
+    console.error('Error saving highlight:', error);
+    alert('Failed to save highlight');
+  }
+};
 
-    try {
-      const response = await fetch(`${API_BASE}/api/books/${bookId}/highlights`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          title: highlightTitle,
-          page_index: colorPickerPosition.pageIndex || currentPageIndex,
-          selected_text: selectedText,
-          color: selectedColor,
-          
-        })
-      });
 
-      const data = await response.json();
+ const deleteHighlight = async (highlightId) => {
+  if (!confirm('Are you sure you want to delete this highlight?')) {
+    return;
+  }
 
-      if (data.success) {
-        setHighlights([...highlights, data.data]);
-        setShowColorPicker(false);
-        setSelectedText('');
-        setHighlightTitle('');
-        setSelectedColor('#FFFF00');
-        window.getSelection().removeAllRanges();
-        // Highlights will be applied automatically by useEffect
-      } else if (data.message === 'Unauthorized') {
-        alert('Please login to save highlights');
-        setShowColorPicker(false);
-        setSelectedText('');
-        setHighlightTitle('');
-        window.getSelection().removeAllRanges();
-      } else {
-        alert(data.message || 'Failed to save highlight');
-      }
-    } catch (error) {
-      console.error('Error saving highlight:', error);
-      alert('Failed to save highlight');
-    }
-  };
+  try {
+    // ✅ localStorage se token lo
+    const bookData = JSON.parse(localStorage.getItem('bookTokenData') || '{}');
+    const token = bookData?.token;
 
-  const deleteHighlight = async (highlightId) => {
-    if (!confirm('Are you sure you want to delete this highlight?')) {
-      return;
-    }
+    const response = await fetch(`${API_BASE}/api/books/${bookId}/highlights?id=${highlightId}`, {
+      method: 'DELETE',
+      headers: {
+        ...(token ? { 'x-book-token': token } : {}),
+      },
+      credentials: 'include',
+    });
 
-    try {
-      const response = await fetch(`${API_BASE}/api/books/${bookId}/highlights?id=${highlightId}`, {
-        method: 'DELETE'
-      });
+    const data = await response.json();
 
-      const data = await response.json();
+    if (data.success) {
+      const newHighlights = highlights.filter(h => h.id !== highlightId);
+      setHighlights(newHighlights);
 
-      if (data.success) {
-        const newHighlights = highlights.filter(h => h.id !== highlightId);
-        setHighlights(newHighlights);
+      // Immediately remove highlight styling from DOM and from allPages content
+      try {
+        const marks = Array.from(document.querySelectorAll(`mark[data-highlight-id="${highlightId}"]`));
+        marks.forEach(m => {
+          try {
+            const frag = document.createRange().createContextualFragment(m.innerHTML || '');
+            m.replaceWith(frag);
+          } catch (err) {
+            m.remove();
+          }
+        });
 
-        // Immediately remove highlight styling from DOM and from allPages content
-        try {
-          // Remove mark elements from DOM
-          const marks = Array.from(document.querySelectorAll(`mark[data-highlight-id="${highlightId}"]`));
-          marks.forEach(m => {
+        if (allPages && allPages.length > 0) {
+          const updated = allPages.map((p) => {
+            if (p.type !== 'content' || !p.content || !p.content.content) return p;
             try {
-              const frag = document.createRange().createContextualFragment(m.innerHTML || '');
-              m.replaceWith(frag);
-            } catch (err) {
-              // fallback: remove node
-              m.remove();
-            }
-          });
+              const container = document.createElement('div');
+              container.innerHTML = p.content.content;
+              const marks = Array.from(container.querySelectorAll(`mark[data-highlight-id="${highlightId}"]`));
+              if (marks.length === 0) return p;
 
-            // Also strip from allPages HTML so React will render without it immediately.
-            // Use DOM operations (safer than regex) to reliably remove <mark> nodes.
-            if (allPages && allPages.length > 0) {
-              const updated = allPages.map((p) => {
-                if (p.type !== 'content' || !p.content || !p.content.content) return p;
+              marks.forEach(m => {
                 try {
-                  const container = document.createElement('div');
-                  container.innerHTML = p.content.content;
-                  const marks = Array.from(container.querySelectorAll(`mark[data-highlight-id="${highlightId}"]`));
-                  if (marks.length === 0) return p;
-
-                  marks.forEach(m => {
-                    try {
-                      const frag = document.createDocumentFragment();
-                      while (m.firstChild) frag.appendChild(m.firstChild);
-                      m.replaceWith(frag);
-                    } catch (e) {
-                      // fallback: remove node
-                      m.remove();
-                    }
-                  });
-
-                  const newHtml = container.innerHTML;
-                  if (newHtml !== p.content.content) {
-                    return { ...p, content: { ...p.content, content: newHtml } };
-                  }
-                } catch (err) {
-                  console.warn('strip mark from page error', err);
-                }
-                return p;
-              });
-              setAllPages(updated);
-              // Ensure UI updates immediately: re-apply highlights to current DOM
-              setTimeout(() => {
-                try {
-                  applyHighlightsToPage();
+                  const frag = document.createDocumentFragment();
+                  while (m.firstChild) frag.appendChild(m.firstChild);
+                  m.replaceWith(frag);
                 } catch (e) {
-                  console.warn('reapply after delete failed', e);
+                  m.remove();
                 }
-              }, 50);
+              });
+
+              const newHtml = container.innerHTML;
+              if (newHtml !== p.content.content) {
+                return { ...p, content: { ...p.content, content: newHtml } };
+              }
+            } catch (err) {
+              console.warn('strip mark from page error', err);
             }
-        } catch (err) {
-          console.warn('immediate highlight remove error', err);
+            return p;
+          });
+          setAllPages(updated);
+          setTimeout(() => {
+            try {
+              applyHighlightsToPage();
+            } catch (e) {
+              console.warn('reapply after delete failed', e);
+            }
+          }, 50);
         }
-      } else {
-        alert(data.message || 'Failed to delete highlight');
+      } catch (err) {
+        console.warn('immediate highlight remove error', err);
       }
-    } catch (error) {
-      console.error('Error deleting highlight:', error);
-      alert('Failed to delete highlight');
+    } else {
+      alert(data.message || 'Failed to delete highlight');
     }
-  };
+  } catch (error) {
+    console.error('Error deleting highlight:', error);
+    alert('Failed to delete highlight');
+  }
+};
+
 
   const goToHighlight = (pageIndex) => {
     if (isSinglePageMode()) {
@@ -492,19 +577,30 @@ export default function BookReaderPage() {
   };
 
   // Bookmark Functions
-  const fetchBookmarks = async () => {
-    try {
-      const response = await fetch(`${API_BASE}/api/books/${bookId}/bookmarks`);
-      const data = await response.json();
-      if (data.success) {
-        setBookmarks(data.data);
-      } else if (data.message === 'Unauthorized') {
-        console.log('User not logged in - bookmarks disabled');
-      }
-    } catch (error) {
-      console.error('Error fetching bookmarks:', error);
+const fetchBookmarks = async () => {
+  try {
+    // ✅ localStorage se token lo
+    const bookData = JSON.parse(localStorage.getItem('bookTokenData') || '{}');
+    const token = bookData?.token;
+
+    const response = await fetch(`${API_BASE}/api/books/${bookId}/bookmarks`, {
+      headers: {
+        ...(token ? { 'x-book-token': token } : {}),
+      },
+      credentials: 'include',
+    });
+
+    const data = await response.json();
+    if (data.success) {
+      setBookmarks(data.data);
+    } else if (data.message === 'Unauthorized') {
+      console.log('User not logged in - bookmarks disabled');
     }
-  };
+  } catch (error) {
+    console.error('Error fetching bookmarks:', error);
+  }
+};
+
 
   const handleBookmarkClick = () => {
     // If we're in single-page mode (mobile OR desktop single view),
@@ -518,60 +614,76 @@ export default function BookReaderPage() {
   };
 
   const toggleBookmark = async (pageIndex) => {
-    try {
-      const response = await fetch(`${API_BASE}/api/books/${bookId}/bookmarks`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          page_index: pageIndex
-        })
-      });
+  try {
+    // ✅ localStorage se token lo
+    const bookData = JSON.parse(localStorage.getItem('bookTokenData') || '{}');
+    const token = bookData?.token;
 
-      const data = await response.json();
-      
-      if (data.success) {
-        if (data.action === 'added') {
-          setBookmarks([...bookmarks, data.data]);
-        } else if (data.action === 'removed') {
-          setBookmarks(bookmarks.filter(b => b.page_index !== pageIndex));
-        }
-        setShowBookmarkModal(false);
-      } else if (data.message === 'Unauthorized') {
-        alert('Please login to add bookmarks');
-        setShowBookmarkModal(false);
-      } else {
-        alert(data.message || 'Failed to toggle bookmark');
+    const response = await fetch(`${API_BASE}/api/books/${bookId}/bookmarks`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { 'x-book-token': token } : {}),
+      },
+      credentials: 'include',
+      body: JSON.stringify({
+        page_index: pageIndex
+      })
+    });
+
+    const data = await response.json();
+    
+    if (data.success) {
+      if (data.action === 'added') {
+        setBookmarks([...bookmarks, data.data]);
+      } else if (data.action === 'removed') {
+        setBookmarks(bookmarks.filter(b => b.page_index !== pageIndex));
       }
-    } catch (error) {
-      console.error('Error toggling bookmark:', error);
-      alert('Failed to toggle bookmark');
+      setShowBookmarkModal(false);
+    } else if (data.message === 'Unauthorized') {
+      alert('Please login to add bookmarks');
+      setShowBookmarkModal(false);
+    } else {
+      alert(data.message || 'Failed to toggle bookmark');
     }
-  };
+  } catch (error) {
+    console.error('Error toggling bookmark:', error);
+    alert('Failed to toggle bookmark');
+  }
+};
+
 
   const deleteBookmark = async (bookmarkId) => {
-    if (!confirm('Are you sure you want to remove this bookmark?')) {
-      return;
-    }
+  if (!confirm('Are you sure you want to remove this bookmark?')) {
+    return;
+  }
 
-    try {
-      const response = await fetch(`${API_BASE}/api/books/${bookId}/bookmarks?id=${bookmarkId}`, {
-        method: 'DELETE'
-      });
+  try {
+    // ✅ localStorage se token lo
+    const bookData = JSON.parse(localStorage.getItem('bookTokenData') || '{}');
+    const token = bookData?.token;
 
-      const data = await response.json();
-      
-      if (data.success) {
-        setBookmarks(bookmarks.filter(b => b.id !== bookmarkId));
-      } else {
-        alert(data.message || 'Failed to delete bookmark');
-      }
-    } catch (error) {
-      console.error('Error deleting bookmark:', error);
-      alert('Failed to delete bookmark');
+    const response = await fetch(`${API_BASE}/api/books/${bookId}/bookmarks?id=${bookmarkId}`, {
+      method: 'DELETE',
+      headers: {
+        ...(token ? { 'x-book-token': token } : {}),
+      },
+      credentials: 'include',
+    });
+
+    const data = await response.json();
+    
+    if (data.success) {
+      setBookmarks(bookmarks.filter(b => b.id !== bookmarkId));
+    } else {
+      alert(data.message || 'Failed to delete bookmark');
     }
-  };
+  } catch (error) {
+    console.error('Error deleting bookmark:', error);
+    alert('Failed to delete bookmark');
+  }
+};
+
 
   const goToBookmark = (pageIndex) => {
     if (isSinglePageMode()) {
@@ -2547,7 +2659,7 @@ function PageContent({ page, pageIndex, pageNumber, highlights, onChapterClick, 
 
 function CoverPage({ book }) {
   return (
-    <div className="page-inner bg-gradient-to-br from-blue-800 via-blue-700 to-blue-900 text-white">
+    <div className="page-inner bg-gradient-to-br from-blue-800 via-blue-700 to-blue-900 text-white" style={{height: '100%'}}>
       {/* Header */}
       <div className="flex-shrink-0 pt-8 text-center" style={{ height: '80px' }}>
         <div className="text-2xl font-bold">
@@ -2602,7 +2714,7 @@ function TableOfContents({ chapters, chapterPageMap, topicPageMap, subtopicPageM
   const topics = chapters; // chapters is actually topics now
   
   return (
-    <div className="page-inner bg-white">
+    <div className="page-inner bg-white" style={{height: '100%'}}>
       {/* Header */}
       <div className="flex-shrink-0 p-10 pb-4">
         <h2 className="text-3xl font-bold text-gray-900 select-text">
@@ -2659,7 +2771,7 @@ function ChapterTitlePage({ chapter, pageNumber, chapterIndex, isDarkMode }) {
     <div
       className={`page-inner relative ${isDarkMode ? 'bg-[#2A2A2A]' : 'bg-white'
         }`}
-    >
+      style={{height: '100%'}}>
       <div className="flex flex-col justify-center items-center p-12 h-full">
         <div className="text-center space-y-6 max-w-2xl">
           {/* Chapter Number */}
@@ -2715,7 +2827,7 @@ function TopicTitlePage({ topic, pageNumber, isDarkMode }) {
     <div
       className={`page-inner relative ${isDarkMode ? 'bg-[#2A2A2A]' : 'bg-white'
         }`}
-    >
+      style={{height: '100%'}}>
       <div className="flex flex-col justify-center items-center p-12 h-full">
         <div className="text-center space-y-6 max-w-2xl">
           {/* Topic Label */}
@@ -2770,7 +2882,7 @@ function SubtopicTitlePage({ subtopic, topicTitle, pageNumber, isDarkMode }) {
     <div
       className={`page-inner relative ${isDarkMode ? 'bg-[#2A2A2A]' : 'bg-white'
         }`}
-    >
+      style={{height: '100%'}}>
       <div className="flex flex-col justify-center items-center p-12 h-full">
         <div className="text-center space-y-6 max-w-2xl">
           {/* Topic Context */}
@@ -2880,7 +2992,7 @@ function ContentPage({ page, pageIndex, highlights, chapterTitle, pageNumber, is
     <div
       className={`page-inner bg-gradient-to-br ${isDarkMode ? 'bg-[#2A2A2A] text-gray-200' : 'bg-[#F4F1EA] text-gray-800'
         }`}
-      style={{ display: 'flex', flexDirection: 'column' }}
+      style={{ display: 'flex', flexDirection: 'column', height: '100%' }}
     >
       {/* Header */}
       <div
@@ -2933,7 +3045,7 @@ function ContentPage({ page, pageIndex, highlights, chapterTitle, pageNumber, is
 
 function BackCoverPage({ book }) {
   return (
-    <div className="page-inner bg-gradient-to-br from-gray-800 to-gray-900 text-white">
+    <div className="page-inner bg-gradient-to-br from-gray-800 to-gray-900 text-white" style={{height: '100%'}}>
       {/* Header */}
       <div className="flex-shrink-0 h-20"></div>
 

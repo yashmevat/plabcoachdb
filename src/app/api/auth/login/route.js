@@ -57,17 +57,18 @@ export async function POST(request) {
         redirectUrl = '/';
     }
 
-    const response = NextResponse.json({
-      success: true,
-      user: {
-        id: user.id,
-        username: user.username,
-        email: user.email,
-        role_id: user.role_id,
-        role_name: user.role_name
-      },
-      redirectUrl
-    });
+   const response = NextResponse.json({
+  success: true,
+  token,          // ← YEH ADD KARO (postMessage ke liye)
+  user: {
+    id: user.id,
+    username: user.username,
+    email: user.email,
+    role_id: user.role_id,
+    role_name: user.role_name
+  },
+  redirectUrl
+});
 
     response.cookies.set('token', token, {
       httpOnly: true,
