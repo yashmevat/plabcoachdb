@@ -933,9 +933,9 @@ export default function TopicPagesPage() {
                         <span className="text-sm font-semibold text-gray-900">
                           Page {index + 1}
                         </span>
-                        <span className="page-status ml-3 text-xs font-semibold text-gray-600">
+                        {/* <span className="page-status ml-3 text-xs font-semibold text-gray-600">
                           0% filled
-                        </span>
+                        </span> */}
                       </div>
                       {livePages.length > 1 && (
                         <button
