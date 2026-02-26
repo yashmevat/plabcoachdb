@@ -1314,7 +1314,7 @@ export default function BookReaderPage() {
      isMobile threshold in JS is <1024, so apply this at >=1024px. */
   @media (min-width: 1024px) {
     .book-spread-container.single-page-mode {
-      max-width: 600px !important; /* adjust as needed */
+      max-width: 700px !important; /* adjust as needed */
     }
   }
 

@@ -26,6 +26,12 @@ export default function TopicPagesPage() {
   const reflowTimeout = useRef(null);
   const topRef = useRef(null);
 
+  // ✅ FIX 1: Always-fresh ref for livePages — solves stale closure in initQuill
+  const livePagesRef = useRef(livePages);
+  useEffect(() => {
+    livePagesRef.current = livePages;
+  }, [livePages]);
+
   // A4 EXACT DIMENSIONS (96 DPI standard)
   const PAGE_WIDTH = 794;
   const PAGE_HEIGHT = 1123;
@@ -60,13 +66,18 @@ export default function TopicPagesPage() {
         } catch (e) {
           console.error('❌ Failed to register Image Resize:', e);
         }
-        
-        setTimeout(() => setQuillLoaded(true), 200);
+        // ✅ FIX 4: Wait for fonts to load before enabling editors — prevents wrong split points
+        (document.fonts ? document.fonts.ready : Promise.resolve()).then(() => {
+          setTimeout(() => setQuillLoaded(true), 100);
+        });
       };
       
       resizeScript.onerror = () => {
         console.error('❌ Failed to load Image Resize module');
-        setTimeout(() => setQuillLoaded(true), 200);
+        // ✅ FIX 4: Same font-ready wait for error path
+        (document.fonts ? document.fonts.ready : Promise.resolve()).then(() => {
+          setTimeout(() => setQuillLoaded(true), 100);
+        });
       };
       
       document.body.appendChild(resizeScript);
@@ -288,8 +299,9 @@ export default function TopicPagesPage() {
       placeholder: 'Start typing or paste content...'
     });
 
-    if (livePages[index]?.content) {
-      quill.root.innerHTML = livePages[index].content;
+    // ✅ FIX: Use livePagesRef so content is always fresh even after re-inits
+    if (livePagesRef.current[index]?.content) {
+      quill.root.innerHTML = livePagesRef.current[index].content;
     }
 
     // Prevent further insertion when page is full, but allow deletions/navigation
@@ -335,21 +347,34 @@ export default function TopicPagesPage() {
 
         if (splitPages.length > 1) {
           setSplitting(true);
-          
+
           quill.root.innerHTML = splitPages[0];
           updatePageContent(index, splitPages[0]);
 
-          if (livePages.length === 1 && (!livePages[0].content || livePages[0].content.trim() === '' || livePages[0].content === '<p><br></p>')) {
+          // ✅ FIX 2: Use livePagesRef.current instead of stale livePages closure
+          const currentPages = livePagesRef.current;
+
+          if (currentPages.length === 1 && (!currentPages[0].content || currentPages[0].content.trim() === '' || currentPages[0].content === '<p><br></p>')) {
+            // Fresh start — replace all pages with new ids
             const newPages = splitPages.map((pageContent, i) => ({
               id: `page-${Date.now()}-${i}`,
               content: pageContent,
               existingPageId: null
             }));
-            
+
+            // All page divs will be unmounted by React (new keys) → must clear everything
             initializedEditors.current.clear();
+            Object.keys(quillRefs.current).forEach(key => {
+              const container = document.getElementById(`editor-${key}`);
+              if (container?.parentNode) {
+                const toolbar = container.parentNode.querySelector('.ql-toolbar');
+                if (toolbar) toolbar.remove();
+              }
+              delete quillRefs.current[key];
+            });
             setLivePages(newPages);
           } else {
-            const newPages = [...livePages];
+            const newPages = [...currentPages];
             for (let i = 1; i < splitPages.length; i++) {
               newPages.splice(index + i, 0, {
                 id: `page-${Date.now()}-${i}`,
@@ -358,15 +383,30 @@ export default function TopicPagesPage() {
               });
             }
 
-            initializedEditors.current.clear();
+            // ✅ FIX 3: Only delete newly inserted page editor slots, not all
+            for (let i = 1; i < splitPages.length; i++) {
+              initializedEditors.current.delete(`editor-${index + i}`);
+            }
             setLivePages(newPages);
           }
 
           setTimeout(() => {
             setSplitting(false);
+            // ✅ FIX 5: Non-blocking toast instead of alert
+            const toast = document.createElement('div');
+            toast.textContent = `✅ Content split into ${splitPages.length} A4 pages!`;
+            toast.style.cssText = `
+              position: fixed; bottom: 24px; right: 24px; z-index: 9999;
+              background: #166534; color: white; padding: 12px 20px;
+              border-radius: 8px; font-size: 14px; font-weight: 600;
+              box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+              transition: opacity 0.4s ease;
+            `;
+            document.body.appendChild(toast);
             setTimeout(() => {
-              alert(`✅ Content split into ${splitPages.length} A4 pages!`);
-            }, 100);
+              toast.style.opacity = '0';
+              setTimeout(() => toast.remove(), 400);
+            }, 2500);
           }, 500);
         }
       }, 100);
@@ -587,14 +627,21 @@ export default function TopicPagesPage() {
       return;
     }
 
-    const editorId = `editor-${index}`;
-    initializedEditors.current.delete(editorId);
-
-    if (quillRefs.current[index]) {
-      delete quillRefs.current[index];
-    }
-
     const newPages = livePages.filter((_, i) => i !== index);
+
+    // ✅ FIX: Clear ALL editors — editors at index > deleted have wrong
+    // stale-closure index in their event handlers. Full reinit fixes this.
+    Object.keys(quillRefs.current).forEach(key => {
+      const container = document.getElementById(`editor-${key}`);
+      if (container?.parentNode) {
+        const toolbar = container.parentNode.querySelector('.ql-toolbar');
+        if (toolbar) toolbar.remove();
+      }
+      delete quillRefs.current[key];
+    });
+    quillRefs.current = {};
+    initializedEditors.current.clear();
+
     setLivePages(newPages);
 
     if (selectedPageIndex >= newPages.length) {
@@ -737,97 +784,15 @@ export default function TopicPagesPage() {
     
     setLivePages([newPage]);
 
+    // ✅ FIX: Use initQuill(0) instead of duplicate manual Quill creation.
+    // initQuill already has clipboard.addMatcher (split on paste), enforceLimit,
+    // text-change handler — all the features the manual code was missing.
     setTimeout(() => {
       if (topRef.current) {
         topRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }
-      
-      const container = document.getElementById('editor-0');
-      
-      if (!container || !window.Quill) return;
-
-      container.innerHTML = '';
-      
-       const quill = new window.Quill('#editor-0', {
-        theme: 'snow',
-        modules: {
-        toolbar: [
-  [{ 'header': [1, 2, 3, 4, 5, 6, false] }],
-  [{ 'font': [] }],  // Font family selector
-  [{ 'size': ['small', false, 'large', 'huge'] }],  // Font size
-  ['bold', 'italic', 'underline', 'strike'],
-  [{ 'color': [] }, { 'background': [] }],
-  [{ 'script': 'sub'}, { 'script': 'super' }],  // Subscript/Superscript
-  [{ 'list': 'ordered'}, { 'list': 'bullet' }, { 'list': 'check' }],  // Checklist
-  [{ 'indent': '-1'}, { 'indent': '+1' }],  // Indent/outdent
-  [{ 'direction': 'rtl' }],  // Text direction
-  [{ 'align': [] }],
-  ['blockquote', 'code-block'],  // Blockquote and code block
-  ['link', 'image'],  // Video embedding
-  ['clean']  // Remove formatting
-], imageResize: {
-    modules: ['Resize', 'DisplaySize', 'Toolbar']
-  },
-
-        },
-        placeholder: 'Edit your content...'
-      });
-
-
-
-      quill.root.innerHTML = page.content;
-
-      // Snapshot safe HTML so we can revert if user overflows the A4 page
-      quill.__lastSafeHtml = quill.root.innerHTML;
-
-      quill.on('text-change', (delta, oldDelta, source) => {
-        const content = quill.root.innerHTML;
-
-        if (source === 'user') {
-          // measure rendered height
-          let contentHeight = 0;
-          try {
-            const temp = document.createElement('div');
-            temp.style.cssText = `position:absolute;visibility:hidden;left:-9999px;top:0;width:${CONTENT_WIDTH}px;padding:0;font-size:16px;line-height:1.6;font-family:'Georgia', 'Times New Roman', serif;word-wrap:break-word;overflow-wrap:break-word;`;
-            temp.innerHTML = content || '';
-            document.body.appendChild(temp);
-            contentHeight = temp.scrollHeight || 0;
-            document.body.removeChild(temp);
-          } catch (e) {
-            contentHeight = quill.root.scrollHeight || 0;
-          }
-
-          if (contentHeight > CONTENT_HEIGHT) {
-            // revert to last safe
-            quill.root.innerHTML = quill.__lastSafeHtml || '';
-            try { quill.setSelection(quill.getLength(), 0); } catch(e) {}
-            const pageHeader = container.closest('.page-editor-container')?.querySelector('.page-header');
-            if (pageHeader) {
-              const old = pageHeader.style.background;
-              pageHeader.style.background = '#fee2e2';
-              setTimeout(() => pageHeader.style.background = old, 600);
-            }
-            return;
-          }
-        }
-
-        setLivePages(prev => {
-          const updated = [...prev];
-          updated[0] = { ...updated[0], content };
-          return updated;
-        });
-
-        quill.__lastSafeHtml = quill.root.innerHTML;
-        updatePageStatus(quill, container);
-      });
-
-      quillRefs.current[0] = quill;
-      initializedEditors.current.add('editor-0');
-      
-      setTimeout(() => {
-        updatePageStatus(quill, container);
-      }, 100);
-    }, 600);
+      initQuill(0);
+    }, 300);
   };
 
   const handleDeleteExistingPage = async (id) => {
