@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 
@@ -23,6 +23,17 @@ export default function PagesPage() {
   ]);
   const [selectedPageIndex, setSelectedPageIndex] = useState(0);
   const [editingPageId, setEditingPageId] = useState(null);
+  const [pageScale, setPageScale] = useState(1);
+  useEffect(() => {
+    const updateScale = () => {
+      // 32px = outer px-4 padding (both sides), 48px = card p-6 padding (both sides)
+      const available = window.innerWidth - 32 - 48;
+      setPageScale(available < PAGE_WIDTH ? available / PAGE_WIDTH : 1);
+    };
+    updateScale();
+    window.addEventListener('resize', updateScale);
+    return () => window.removeEventListener('resize', updateScale);
+  }, []);
   const quillRefs = useRef({});
   const initializedEditors = useRef(new Set());
   const reflowTimeout = useRef(null);
@@ -40,8 +51,10 @@ export default function PagesPage() {
   const HEADER_HEIGHT = 60;
   const FOOTER_HEIGHT = 50;
   const CONTENT_PADDING = 40;
-  const CONTENT_HEIGHT = PAGE_HEIGHT - HEADER_HEIGHT - FOOTER_HEIGHT;
-  const CONTENT_WIDTH = PAGE_WIDTH - (CONTENT_PADDING * 2);
+  const CONTENT_HEIGHT = PAGE_HEIGHT - HEADER_HEIGHT - FOOTER_HEIGHT; // 1013px full container
+  const CONTENT_WIDTH = PAGE_WIDTH - (CONTENT_PADDING * 2);           // 714px text area width
+  // .ql-editor has padding 40px top + 40px bottom — actual visible text area height:
+  const EFFECTIVE_CONTENT_HEIGHT = CONTENT_HEIGHT - (2 * CONTENT_PADDING); // 933px
 
   // ⚡ OPTIMIZATION 1: Persistent measurement div
   const measureHeight = useRef(null);
@@ -57,11 +70,14 @@ export default function PagesPage() {
       top: 0;
       width: ${CONTENT_WIDTH}px;
       padding: 0;
+      margin: 0;
+      border: none;
       font-size: 16px;
       line-height: 1.6;
       font-family: Arial, sans-serif;
       word-wrap: break-word;
       overflow-wrap: break-word;
+      white-space: normal;
       box-sizing: border-box;
     `;
     document.body.appendChild(measureDiv);
@@ -181,43 +197,38 @@ useEffect(() => {
       const block = blocks[blockIdx];
       const tagName = block.tagName.toLowerCase();
       
-      // 🔥 NEW: Handle images separately
+      // Handle blocks containing images — measure actual rendered height
       if (block.querySelector('img')) {
-        const images = block.querySelectorAll('img');
-        images.forEach(img => {
-          const imgHeight = parseInt(img.style.height) || 200;
-          const imgHTML = img.outerHTML;
-          
-          if (currentHeight + imgHeight > CONTENT_HEIGHT) {
-            if (currentPageHTML.trim()) {
-              pages.push(currentPageHTML.trim());
-            }
-            currentPageHTML = imgHTML;
-            currentHeight = imgHeight;
-          } else {
-            currentPageHTML += imgHTML;
-            currentHeight += imgHeight;
-          }
-        });
+        const blockHTML = block.outerHTML;
+        // Render in measureDiv to get true pixel height (respects max-width, style.width/height)
+        measureHeight.current.innerHTML = blockHTML;
+        const blockRenderedHeight = measureHeight.current.scrollHeight || 0;
+        measureHeight.current.innerHTML = '';
+
+        if (currentHeight + blockRenderedHeight > EFFECTIVE_CONTENT_HEIGHT) {
+          if (currentPageHTML.trim()) pages.push(currentPageHTML.trim());
+          currentPageHTML = blockHTML;
+          currentHeight = blockRenderedHeight;
+        } else {
+          currentPageHTML += blockHTML;
+          currentHeight += blockRenderedHeight;
+        }
         continue;
       }
 
-      // 🔥 NEW: Handle tables as single unit
+      // Handle tables as single unit
       if (tagName === 'table') {
         const tableHTML = block.outerHTML;
         const tableHeight = getContentHeight(tableHTML);
-        
-        if (tableHeight > CONTENT_HEIGHT) {
-          if (currentPageHTML.trim()) {
-            pages.push(currentPageHTML.trim());
-            currentPageHTML = '';
-          }
-          pages.push(tableHTML);
+
+        if (tableHeight > EFFECTIVE_CONTENT_HEIGHT) {
+          // Table bigger than one page — give it its own page anyway
+          if (currentPageHTML.trim()) pages.push(currentPageHTML.trim());
+          currentPageHTML = '';
           currentHeight = 0;
-        } else if (currentHeight + tableHeight > CONTENT_HEIGHT) {
-          if (currentPageHTML.trim()) {
-            pages.push(currentPageHTML.trim());
-          }
+          pages.push(tableHTML);
+        } else if (currentHeight + tableHeight > EFFECTIVE_CONTENT_HEIGHT) {
+          if (currentPageHTML.trim()) pages.push(currentPageHTML.trim());
           currentPageHTML = tableHTML;
           currentHeight = tableHeight;
         } else {
@@ -236,40 +247,37 @@ useEffect(() => {
       const testHTML = currentPageHTML + blockHTML;
       const testHeight = getContentHeight(testHTML);
 
-      if (testHeight > CONTENT_HEIGHT) {
+      if (testHeight > EFFECTIVE_CONTENT_HEIGHT) {
         if (currentPageHTML.trim()) {
           pages.push(currentPageHTML.trim());
           currentPageHTML = '';
           currentHeight = 0;
         }
 
-        // 🔥 IMPROVED: Better sentence splitting with Hindi punctuation
+        // Sentence-level splitting (supports . ! ? and Hindi ।)
         const sentences = block.innerHTML.split(/(?<=[.!?।])\s+/);
         let sentenceBuffer = '';
 
         for (let sentence of sentences) {
           if (!sentence.trim()) continue;
 
-          const testSentence = sentenceBuffer 
-            ? `${sentenceBuffer} ${sentence}` 
+          const testSentence = sentenceBuffer
+            ? `${sentenceBuffer} ${sentence}`
             : sentence;
-          
+
           const testHTML = `<${tagName}${blockAttrs}>${testSentence}</${tagName}>`;
           const sentenceHeight = getContentHeight(currentPageHTML + testHTML);
 
-          if (sentenceHeight > CONTENT_HEIGHT) {
+          if (sentenceHeight > EFFECTIVE_CONTENT_HEIGHT) {
             if (sentenceBuffer) {
               const sentenceHTML = `<${tagName}${blockAttrs}>${sentenceBuffer}</${tagName}>`;
               const pageToSave = (currentPageHTML + sentenceHTML).trim();
-              
-              if (pageToSave) {
-                pages.push(pageToSave);
-              }
+              if (pageToSave) pages.push(pageToSave);
               currentPageHTML = '';
               currentHeight = 0;
               sentenceBuffer = sentence;
             } else {
-              // 🔥 IMPROVED: Word-level splitting
+              // Word-level splitting fallback
               const words = sentence.split(/\s+/);
               let wordBuffer = '';
 
@@ -278,7 +286,7 @@ useEffect(() => {
                 const testHTML = `<${tagName}${blockAttrs}>${testWord}</${tagName}>`;
                 const wordHeight = getContentHeight(currentPageHTML + testHTML);
 
-                if (wordHeight > CONTENT_HEIGHT && wordBuffer) {
+                if (wordHeight > EFFECTIVE_CONTENT_HEIGHT && wordBuffer) {
                   const wordHTML = `<${tagName}${blockAttrs}>${wordBuffer}</${tagName}>`;
                   pages.push((currentPageHTML + wordHTML).trim());
                   currentPageHTML = '';
@@ -289,9 +297,7 @@ useEffect(() => {
                 }
               }
 
-              if (wordBuffer) {
-                sentenceBuffer = wordBuffer;
-              }
+              if (wordBuffer) sentenceBuffer = wordBuffer;
             }
           } else {
             sentenceBuffer = testSentence;
@@ -315,6 +321,37 @@ useEffect(() => {
 
     return pages.length > 0 ? pages : [htmlContent];
   };
+
+  // ── FORWARD REFLOW ──────────────────────────────────────────────────────
+  // Overflows from page `index` spill forward. Pages before `index` are
+  // never touched. The content of page `index` + all subsequent pages is
+  // merged, re-split, and written back starting at position `index`.
+  const forwardReflow = (index, newContent, allPages) => {
+    // Collect tail content: everything AFTER the current page
+    let tailContent = '';
+    for (let i = index + 1; i < allPages.length; i++) {
+      const c = allPages[i].content || '';
+      if (c.trim() && c !== '<p><br></p>') tailContent += c;
+    }
+
+    const merged = newContent + tailContent;
+    const splitResult = splitContentIntoPages(merged);
+
+    // Pages before index stay exactly as they were
+    const newPages = allPages.slice(0, index).map(p => ({ ...p }));
+
+    splitResult.forEach((pageContent, i) => {
+      const existingAtPos = allPages[index + i];
+      newPages.push({
+        id: existingAtPos?.id || `page-${Date.now()}-${index}-${i}`,
+        content: pageContent,
+        existingPageId: existingAtPos?.existingPageId || null
+      });
+    });
+
+    return { newPages, firstContent: splitResult[0] };
+  };
+  // ─────────────────────────────────────────────────────────────────────────
 
   const initQuill = (index) => {
     if (!window.Quill) return;
@@ -384,98 +421,45 @@ useEffect(() => {
     let textChangeTimeout = null;
     const THROTTLE_DELAY = 500;
 
-    const enforceLimit = () => {
-      const onKeyDown = (e) => {
-        try {
-          const h = getContentHeight(quill.root.innerHTML);
-          if (h >= CONTENT_HEIGHT) {
-            const allowed = ['Backspace','Delete','ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End','PageUp','PageDown','Tab'];
-            if (allowed.includes(e.key) || e.ctrlKey || e.metaKey) return;
-            e.preventDefault();
-            const pageHeader = container.closest('.page-editor-container')?.querySelector('.page-header');
-            if (pageHeader) {
-              const old = pageHeader.style.background;
-              pageHeader.style.background = '#fee2e2';
-              setTimeout(() => pageHeader.style.background = old, 450);
-            }
-          }
-        } catch (err) {}
-      };
-
-      const onPaste = (e) => {
-        try {
-          const h = getContentHeight(quill.root.innerHTML);
-          if (h >= CONTENT_HEIGHT) {
-            e.preventDefault();
-            alert('Page is full. Remove some content before pasting.');
-          }
-        } catch (err) {}
-      };
-
-      quill.root.addEventListener('keydown', onKeyDown);
-      quill.root.addEventListener('paste', onPaste);
-      quill.__enforceHandlers = { onKeyDown, onPaste };
-    };
-
-    enforceLimit();
+    // No hard blocking — forward reflow handles overflow automatically.
+    // (Paste is also allowed through; clipboard.addMatcher + forwardReflow take over.)
 
     quill.clipboard.addMatcher(Node.ELEMENT_NODE, (node, delta) => {
       setTimeout(() => {
         const currentContent = quill.root.innerHTML;
-        const splitPages = splitContentIntoPages(currentContent);
+        const contentHeight = getContentHeight(currentContent);
 
-        if (splitPages.length > 1) {
+        if (contentHeight > EFFECTIVE_CONTENT_HEIGHT) {
           setSplitting(true);
 
-          quill.root.innerHTML = splitPages[0];
-          updatePageContent(index, splitPages[0]);
-
-          // ✅ FIX 2: Use livePagesRef.current instead of stale livePages closure
           const currentPages = livePagesRef.current;
+          const { newPages, firstContent } = forwardReflow(index, currentContent, currentPages);
 
-          if (currentPages.length === 1 && (!currentPages[0].content || currentPages[0].content.trim() === '' || currentPages[0].content === '<p><br></p>')) {
-            // Fresh start — replace all pages with new ids
-            const newPages = splitPages.map((pageContent, i) => ({
-              id: `page-${Date.now()}-${i}`,
-              content: pageContent,
-              existingPageId: null
-            }));
+          // Update this editor to show only what fits on this page
+          quill.root.innerHTML = firstContent;
 
-            // All page divs will be unmounted by React (new keys) → must clear everything
-            // so initQuill runs fresh for every new div
-            initializedEditors.current.clear();
-            Object.keys(quillRefs.current).forEach(key => {
-              const container = document.getElementById(`editor-${key}`);
-              if (container?.parentNode) {
-                const toolbar = container.parentNode.querySelector('.ql-toolbar');
-                if (toolbar) toolbar.remove();
-              }
-              delete quillRefs.current[key];
-            });
-            setLivePages(newPages);
-          } else {
-            const newPages = [...currentPages];
-            // ✅ FIX 2: index is correct because we use currentPages (latest snapshot)
-            for (let i = 1; i < splitPages.length; i++) {
-              newPages.splice(index + i, 0, {
-                id: `page-${Date.now()}-${i}`,
-                content: splitPages[i],
-                existingPageId: null
-              });
+          // Clear editors for all pages after index so they reinit with new content
+          for (let i = index + 1; i < currentPages.length; i++) {
+            initializedEditors.current.delete(`editor-${i}`);
+            const c = document.getElementById(`editor-${i}`);
+            if (c?.parentNode) {
+              const tb = c.parentNode.querySelector('.ql-toolbar');
+              if (tb) tb.remove();
             }
-
-            // ✅ FIX 3: Only delete newly inserted page editor slots, not all
-            for (let i = 1; i < splitPages.length; i++) {
-              initializedEditors.current.delete(`editor-${index + i}`);
-            }
-            setLivePages(newPages);
+            delete quillRefs.current[i];
           }
+          // Also clear slots for any newly generated pages beyond old length
+          for (let i = currentPages.length; i < newPages.length; i++) {
+            initializedEditors.current.delete(`editor-${i}`);
+          }
+
+          setLivePages(newPages);
 
           setTimeout(() => {
             setSplitting(false);
-            // ✅ FIX 5: Non-blocking toast instead of alert
             const toast = document.createElement('div');
-            toast.textContent = `✅ Content split into ${splitPages.length} A4 pages!`;
+            const newPagesCount = newPages.length - index;
+            toast.textContent = `✅ Content reflowed across ${newPagesCount} page${newPagesCount > 1 ? 's' : ''} (pages ${index + 1}–${newPages.length})!`;
             toast.style.cssText = `
               position: fixed; bottom: 24px; right: 24px; z-index: 9999;
               background: #166534; color: white; padding: 12px 20px;
@@ -484,10 +468,7 @@ useEffect(() => {
               transition: opacity 0.4s ease;
             `;
             document.body.appendChild(toast);
-            setTimeout(() => {
-              toast.style.opacity = '0';
-              setTimeout(() => toast.remove(), 400);
-            }, 2500);
+            setTimeout(() => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 400); }, 2500);
           }, 500);
         }
       }, 100);
@@ -496,78 +477,44 @@ useEffect(() => {
     });
 
     // ⚡ OPTIMIZATION 4: Debounced text change handler
-    quill.on('text-change', () => {
-      if (textChangeTimeout) {
-        clearTimeout(textChangeTimeout);
-      }
+    quill.on('text-change', (delta, oldDelta, source) => {
+      if (textChangeTimeout) clearTimeout(textChangeTimeout);
 
       textChangeTimeout = setTimeout(() => {
         const content = quill.root.innerHTML;
-        const contentHeight = getContentHeight(content);
 
-        let fillPercentage = Math.min(100, Math.max(0, Math.round((contentHeight / CONTENT_HEIGHT) * 100)));
+        // Use quill.root.scrollHeight — true rendered height with all Quill CSS
+        // (font-size classes, bold, images, etc.) applied. No subtraction needed.
+        if (quill.root.scrollHeight > CONTENT_HEIGHT) {
+          // Undo the change that caused overflow
+          quill.history.undo();
 
-        if ((contentHeight === 0 || isNaN(fillPercentage)) && content && content.trim() && content !== '<p><br></p>') {
-          const tempText = (new DOMParser().parseFromString(content, 'text/html').body.textContent || '').trim();
-          const words = tempText.split(/\s+/).filter(w => w.length > 0).length;
-          const WORDS_PER_PAGE = 450;
-          fillPercentage = Math.min(99, Math.round((words / WORDS_PER_PAGE) * 100));
-        }
-        
-        if (reflowTimeout.current) {
-          clearTimeout(reflowTimeout.current);
-        }
-        
-        // 🔥 IMPROVED: Auto-reflow with 2% tolerance
-        if (contentHeight > CONTENT_HEIGHT * 1.02) {
-          reflowTimeout.current = setTimeout(() => {
-            setLivePages(prev => {
-              const updated = [...prev];
-              updated[index] = { ...updated[index], content };
-              
-              let allContent = '';
-              for (let i = 0; i < updated.length; i++) {
-                const pageContent = updated[i].content || '';
-                if (pageContent.trim() && pageContent !== '<p><br></p>') {
-                  allContent += pageContent;
-                }
-              }
-              
-              const reflowedPages = splitContentIntoPages(allContent);
-              
-              const newPages = [];
-              reflowedPages.forEach((pageContent, i) => {
-                newPages.push({
-                  id: updated[i]?.id || `page-${Date.now()}-${i}`,
-                  content: pageContent,
-                  existingPageId: updated[i]?.existingPageId || null
-                });
-              });
-              
-              return newPages;
-            });
-            
-            setTimeout(() => {
-              initializedEditors.current.clear();
-              Object.keys(quillRefs.current).forEach(key => {
-                const container = document.getElementById(`editor-${key}`);
-                if (container?.parentNode) {
-                  const toolbar = container.parentNode.querySelector('.ql-toolbar');
-                  if (toolbar) toolbar.remove();
-                }
-                delete quillRefs.current[key];
-              });
-            }, 50);
-          }, 800);
-          
+          // Show red warning toast
+          const existing = document.getElementById('page-full-toast');
+          if (existing) existing.remove();
+          const toast = document.createElement('div');
+          toast.id = 'page-full-toast';
+          toast.textContent = '⚠️ Page is full! Please add a new page.';
+          toast.style.cssText = `
+            position: fixed; bottom: 24px; right: 24px; z-index: 9999;
+            background: #dc2626; color: white; padding: 12px 20px;
+            border-radius: 8px; font-size: 14px; font-weight: 600;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            transition: opacity 0.4s ease;
+          `;
+          document.body.appendChild(toast);
+          setTimeout(() => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 400); }, 2500);
           return;
         }
-        
+
+        const contentHeight = getContentHeight(content);
+        const fillPercentage = Math.min(100, Math.max(0, Math.round((contentHeight / EFFECTIVE_CONTENT_HEIGHT) * 100)));
+
         updatePageContent(index, content);
-        
+
         const pageHeader = document.querySelector(`#editor-${index}`)?.closest('.page-editor-container')?.querySelector('.page-header');
         const pageStatus = pageHeader?.querySelector('.page-status');
-        
+
         if (pageHeader && pageStatus) {
           if (fillPercentage >= 95) {
             pageHeader.style.background = '#fef3c7';
@@ -613,6 +560,27 @@ useEffect(() => {
       initQuill(livePages.length);
       setSelectedPageIndex(livePages.length);
     }, 200);
+  };
+
+  const insertPageAt = (afterIndex) => {
+    const newPage = { id: `page-${Date.now()}`, content: '', existingPageId: null };
+    const newPages = [
+      ...livePages.slice(0, afterIndex + 1),
+      newPage,
+      ...livePages.slice(afterIndex + 1)
+    ];
+    // Clear all editors — stale-closure index in handlers becomes wrong after insertion
+    Object.keys(quillRefs.current).forEach(key => {
+      const container = document.getElementById(`editor-${key}`);
+      if (container?.parentNode) {
+        const toolbar = container.parentNode.querySelector('.ql-toolbar');
+        if (toolbar) toolbar.remove();
+      }
+      delete quillRefs.current[key];
+    });
+    quillRefs.current = {};
+    initializedEditors.current.clear();
+    setLivePages(newPages);
   };
 
   const deletePage = (index) => {
@@ -747,7 +715,7 @@ useEffect(() => {
     if (!quill || !container) return;
 
     const contentHeight = getContentHeight(quill.root.innerHTML);
-    let fillPercentage = Math.min(100, Math.max(0, Math.round((contentHeight / CONTENT_HEIGHT) * 100)));
+    let fillPercentage = Math.min(100, Math.max(0, Math.round((contentHeight / EFFECTIVE_CONTENT_HEIGHT) * 100)));
 
     if ((contentHeight === 0 || isNaN(fillPercentage)) && quill && quill.root) {
       const text = (new DOMParser().parseFromString(quill.root.innerHTML || '', 'text/html').body.textContent || '').trim();
@@ -760,7 +728,7 @@ useEffect(() => {
     const pageStatus = pageHeader?.querySelector('.page-status');
 
     if (pageHeader && pageStatus) {
-      if (contentHeight > CONTENT_HEIGHT) {
+      if (contentHeight > EFFECTIVE_CONTENT_HEIGHT) {
         pageHeader.style.background = '#fee2e2';
         pageStatus.textContent = '⚠️ Exceeds A4 page!';
         pageStatus.className = 'page-status ml-3 text-xs font-semibold text-red-600';
@@ -862,8 +830,8 @@ useEffect(() => {
         }
 
         .page-editor-container {
-          width: 100%;
-          max-width: ${PAGE_WIDTH}px;
+          width: ${PAGE_WIDTH}px;
+          flex-shrink: 0;
           height: ${PAGE_HEIGHT + 40}px;
           background: white;
           box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
@@ -873,18 +841,9 @@ useEffect(() => {
           flex-direction: column;
           box-sizing: border-box;
           transition: box-shadow 0.2s ease;
-          margin: 12px auto;
         }
 
-        @media (max-width: 820px) {
-          .page-wrapper {
-            overflow-x: auto;
-            justify-content: flex-start;
-          }
-          .page-editor-container {
-            flex-shrink: 0;
-          }
-        }
+        /* Remove the old media query — no special mobile overrides needed */
 
         .page-header {
           height: ${HEADER_HEIGHT}px;
@@ -1017,15 +976,16 @@ useEffect(() => {
           color: #1f2937;
         }
 
-        .mt-16, .mt-16 * {
-          color: #111827 !important;
-          -webkit-text-fill-color: #111827 !important;
-          background-color: transparent !important;
+        .saved-pages-section {
+          color: #111827;
         }
 
-        .mt-16 .bg-white {
+        .saved-pages-section .bg-white {
           background: #ffffff !important;
-          color: #111827 !important;
+        }
+
+        .saved-pages-section button {
+          color: inherit;
         }
       `}</style>
 
@@ -1051,79 +1011,102 @@ useEffect(() => {
             </ol>
           </nav>
 
-          <div className="bg-white rounded-xl shadow-lg p-6 mb-8">
-            <h1 className="text-3xl font-bold text-gray-900 mb-2">
+          <div className="bg-white rounded-xl shadow-lg p-4 sm:p-6 mb-8">
+            <h1 className="text-xl sm:text-3xl font-bold text-gray-900 mb-1">
               📖 {subtopicTitle}
             </h1>
-            <p className="text-gray-600">
+            <p className="text-sm text-gray-600">
               Add pages directly to this subtopic
             </p>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
             <div className="lg:col-span-12">
-              <div className="bg-white rounded-xl shadow-lg p-6">
-                <div className="flex items-center justify-between mb-6">
-                  <h2 className="text-xl font-semibold text-gray-900">
+              <div className="bg-white rounded-xl shadow-lg p-3 sm:p-6 overflow-hidden">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
+                  <h2 className="text-base sm:text-xl font-semibold text-gray-900">
                     {editingPageId ? 'Edit Page' : 'Create New Pages'}
                   </h2>
                   <div className="flex gap-2">
                     <button
                       onClick={addNewPage}
                       disabled={splitting}
-                      className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 transition"
+                      className="flex-1 sm:flex-none px-3 sm:px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 transition text-sm font-medium"
                     >
                       + Add Page
                     </button>
                     <button
                       onClick={saveAllPages}
                       disabled={loading || splitting}
-                      className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:bg-gray-400 transition font-medium"
+                      className="flex-1 sm:flex-none px-3 sm:px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:bg-gray-400 transition text-sm font-medium"
                     >
                       {loading ? 'Saving...' : 'Save All Pages'}
                     </button>
                   </div>
                 </div>
 
-                <div className="space-y-6">
+                <div className="space-y-0">
                   {livePages.map((page, index) => (
-                    <div key={page.id} className="page-editor-container border border-gray-300 rounded-lg overflow-hidden">
-                      <div className="page-header flex items-center justify-between px-4 py-3 bg-gray-50">
-                        <div className="flex items-center">
-                          <span className="text-sm font-semibold text-gray-900">
-                            Page {index + 1}
-                          </span>
-                          {/* <span className="page-status ml-3 text-xs font-semibold text-gray-600">
-                            0% filled
-                          </span> */}
+                    <React.Fragment key={page.id}>
+                      {/* Scale wrapper: collapses height to match visual size, no scrollbar */}
+                      <div style={{
+                        width: '100%',
+                        height: pageScale < 1 ? `${(PAGE_HEIGHT + 40) * pageScale}px` : 'auto',
+                        overflow: 'hidden',
+                        marginBottom: '12px',
+                      }}>
+                        <div
+                          className="page-editor-container border border-gray-300 rounded-lg overflow-hidden"
+                          style={pageScale < 1 ? { transform: `scale(${pageScale})`, transformOrigin: 'top left' } : {}}
+                        >
+                        <div className="page-header flex items-center justify-between px-4 py-3 bg-gray-50">
+                          <div className="flex items-center">
+                            <span className="text-sm font-semibold text-gray-900">
+                              Page {index + 1}
+                            </span>
+                          </div>
+                          {livePages.length > 1 && (
+                            <button
+                              onClick={() => deletePage(index)}
+                              className="text-red-600 hover:text-red-800 p-1 rounded hover:bg-red-50"
+                            >
+                              🗑️
+                            </button>
+                          )}
                         </div>
-                        {livePages.length > 1 && (
-                          <button
-                            onClick={() => deletePage(index)}
-                            className="text-red-600 hover:text-red-800 p-1 rounded hover:bg-red-50"
-                          >
-                            🗑️
-                          </button>
-                        )}
+                        <div
+                          id={`editor-${index}`}
+                          className="quill-editor"
+                          style={{
+                            minHeight: `${CONTENT_HEIGHT}px`,
+                            maxHeight: `${CONTENT_HEIGHT}px`,
+                            overflow: 'auto'
+                          }}
+                        />
+                        </div>{/* end page-editor-container */}
+                      </div>{/* end scale wrapper */}
+                      {/* ── Insert page button between pages ── */}
+                      <div className="flex items-center justify-center my-1 mb-3">
+                        <div className="flex-1 h-px bg-gray-200" />
+                        <button
+                          onClick={() => insertPageAt(index)}
+                          title="Insert blank page here"
+                          className="mx-3 w-8 h-8 flex items-center justify-center rounded-full bg-white border-2 border-dashed border-gray-300 text-gray-400 hover:border-indigo-500 hover:text-indigo-600 hover:bg-indigo-50 transition text-lg font-bold leading-none"
+                        >
+                          +
+                        </button>
+                        <div className="flex-1 h-px bg-gray-200" />
                       </div>
-                      <div
-                        id={`editor-${index}`}
-                        className="quill-editor"
-                        style={{
-                          minHeight: `${CONTENT_HEIGHT}px`,
-                          maxHeight: `${CONTENT_HEIGHT}px`,
-                          overflow: 'auto'
-                        }}
-                      />
-                    </div>
+                    </React.Fragment>
                   ))}
                 </div>
               </div>
             </div>
           </div>
+        </div>
 
-          <div className="mt-16">
-            <h2 className="text-2xl font-bold text-gray-800 mb-6">📚 Saved A4 Pages ({pages.length})</h2>
+          <div className="saved-pages-section mt-10 max-w-7xl mx-auto px-4 pb-12">
+            <h2 className="text-lg sm:text-2xl font-bold text-gray-800 mb-4">📚 Saved A4 Pages ({pages.length})</h2>
             
             {pages.length === 0 ? (
               <div className="bg-white p-12 rounded-xl shadow-lg text-center text-gray-500 border border-gray-200">
@@ -1142,41 +1125,39 @@ useEffect(() => {
                       editingPageId === page.id ? 'ring-2 ring-yellow-500 border-yellow-500' : 'border-gray-200 hover:shadow-xl'
                     }`}
                   >
-                    <div className="p-6">
-                      <div className="flex items-center justify-between mb-4">
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center">
-                            <span className="text-indigo-600 font-bold text-sm">{index + 1}</span>
-                          </div>
-                          <div>
-                            <h3 className="text-lg font-semibold text-gray-900">Page {index + 1}</h3>
-                            <p className="text-xs text-gray-500">{countWords(page.content)} words</p>
-                          </div>
-                          {editingPageId === page.id && (
-                            <span className="editing-indicator text-xs">
-                              ✏️ Editing
-                            </span>
-                          )}
+                    <div className="p-3 sm:p-5">
+                      {/* Top row: number + title + buttons */}
+                      <div className="flex items-center gap-2 mb-3">
+                        <div className="w-8 h-8 flex-shrink-0 bg-indigo-100 rounded-full flex items-center justify-center">
+                          <span className="text-indigo-600 font-bold text-xs">{index + 1}</span>
                         </div>
-                        <div className="flex gap-2">
+                        <div className="min-w-0 flex-1">
+                          <h3 className="text-sm font-semibold text-gray-900">Page {index + 1}</h3>
+                          <p className="text-xs text-gray-500">{countWords(page.content)} words</p>
+                        </div>
+                        {editingPageId === page.id && (
+                          <span className="editing-indicator text-xs flex-shrink-0 px-2 py-1">
+                            ✏️ Editing
+                          </span>
+                        )}
+                        <div className="flex gap-1.5 flex-shrink-0">
                           <button
                             onClick={() => handleEditExistingPage(page)}
                             disabled={editingPageId === page.id}
-                            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 transition text-sm"
+                            className="px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 transition text-xs font-medium"
                           >
                             {editingPageId === page.id ? 'Editing...' : 'Edit'}
                           </button>
                           <button
                             onClick={() => handleDeleteExistingPage(page.id)}
-                            className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition text-sm"
+                            className="px-3 py-1.5 bg-red-600 text-white rounded-lg hover:bg-red-700 transition text-xs font-medium"
                           >
                             Delete
                           </button>
                         </div>
                       </div>
-                      
                       <div 
-                        className="prose prose-sm max-w-none border border-gray-200 rounded-lg p-4 bg-gray-50 max-h-60 overflow-y-auto"
+                        className="prose prose-sm max-w-none border border-gray-200 rounded-lg p-3 bg-gray-50 max-h-48 overflow-y-auto overflow-x-auto text-xs"
                         dangerouslySetInnerHTML={{ __html: page.content }}
                       />
                     </div>
@@ -1186,7 +1167,6 @@ useEffect(() => {
             )}
           </div>
         </div>
-      </div>
     </>
   );
 }
