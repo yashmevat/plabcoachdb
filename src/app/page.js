@@ -31,7 +31,7 @@ export default function Home() {
   };
 
   const handleBookClick = (bookId) => {
-    router.push(`/book/${bookId}`);
+    router.push(`/embed/book/${bookId}`);
   };
 
   const handleLogout = async () => {

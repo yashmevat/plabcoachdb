@@ -61,9 +61,9 @@ export default function BookReaderPage() {
   const speechRef = useRef(null);
   const utteranceRef = useRef(null);
 
-  // A4 EXACT dimensions at 96 DPI
-  const A4_WIDTH = 820;
-  const A4_HEIGHT = 1300;
+  // A4 EXACT dimensions at 96 DPI (matching author page: PAGE_WIDTH=794, PAGE_HEIGHT=1123)
+  const A4_WIDTH = 794;
+  const A4_HEIGHT = 1123;
   const [maxPageHeight, setMaxPageHeight] = useState(A4_HEIGHT);
   const prevFontSizeRef = useRef(fontSize); // Track previous font size with ref (more reliable)
   const globalMaxHeightRef = useRef(0); // Start at 0 so first measurement sets the correct height
@@ -1414,6 +1414,44 @@ const fetchBookmarks = async () => {
     overflow-x: hidden;
   }
 
+  /*removing default margins */
+  .book-content-text p {
+    font-size: calc(15px * var(--font-scale, 1));
+     margin-bottom: 0em !important; 
+     display: block !important;
+}
+.book-content-text img {
+    border-radius: 0px !important;
+    max-width: 100%;
+    height: auto;
+    max-height: 250px;
+    margin: 1em auto;
+    display: block;
+}
+
+.book-content-text ul, .book-content-text ol {
+    font-size: calc(16px * var(--font-scale, 1));
+    margin-bottom: 0em !important;
+    margin-left:0em !important;
+    padding-left: 0em !important;
+}
+
+.book-content-text li {
+    font-size: calc(16px * var(--font-scale, 1));
+    margin-bottom: 0em !important;
+    display: list-item !important;
+}
+
+
+.book-content-text h1 {
+    font-size: calc(26px * var(--font-scale, 1));
+    display:block !important;
+    color: #1a1a1a;
+     margin-top:0em !important; 
+    margin-bottom: 0em !important; 
+    font-weight: bold;
+    line-height: 1.3;
+}
   /* Book Container with Responsive Scaling */
   .book-spread-container {
     position: relative;
@@ -1426,7 +1464,7 @@ const fetchBookmarks = async () => {
      isMobile threshold in JS is <1024, so apply this at >=1024px. */
   @media (min-width: 1024px) {
     .book-spread-container.single-page-mode {
-      max-width: 600px !important; /* adjust as needed */
+      max-width: 700px !important; /* adjust as needed */
     }
   }
 
@@ -1445,7 +1483,7 @@ const fetchBookmarks = async () => {
     .book-spread-container {
       transform: scale(1);
       transform-origin: center top;
-      max-width: ${A4_WIDTH +200}px;
+      max-width: 70%;
     }
   }
   
@@ -2948,6 +2986,13 @@ function ContentPage({ page, pageIndex, highlights, chapterTitle, pageNumber, is
   // Prepare HTML content and inject highlights for this page synchronously
   let htmlContent = page.content || `<p class="${isDarkMode ? 'text-gray-500' : 'text-gray-400'} italic text-center mt-20">No content available</p>`;
 
+  // Remove empty <p><br></p> tags only from the start and end of content
+  const emptyP = /^(\s*<p[^>]*>\s*(<br\s*\/?>)?\s*<\/p>\s*)+/gi;
+  htmlContent = htmlContent.replace(emptyP, '');
+  htmlContent = htmlContent.replace(new RegExp(emptyP.source + '$', 'gi'), '').trimEnd();
+  // Trim trailing empty <p><br></p>
+  htmlContent = htmlContent.replace(/(\s*<p[^>]*>\s*(<br\s*\/?>)?\s*<\/p>\s*)+$/gi, '');
+
   try {
     if (highlights && highlights.length > 0 && typeof pageIndex === 'number') {
       const pageHighlights = highlights.filter(h => h.page_index === pageIndex);
@@ -2990,30 +3035,29 @@ function ContentPage({ page, pageIndex, highlights, chapterTitle, pageNumber, is
   }
   return (
     <div
-      className={`page-inner bg-gradient-to-br ${isDarkMode ? 'bg-[#2A2A2A] text-gray-200' : 'bg-[#F4F1EA] text-gray-800'
-        }`}
+      className={`page-inner ${isDarkMode ? 'bg-[#2A2A2A] text-gray-200' : 'bg-white text-gray-900'}`}
       style={{ display: 'flex', flexDirection: 'column', height: '100%' }}
     >
       {/* Header */}
       <div
-        className={`flex-shrink-0 px-10 pt-4 pb-4 border-b ${isDarkMode
+        className={`flex-shrink-0 border-b-2 ${isDarkMode
             ? 'bg-[#2A2A2A] border-gray-700'
-            : 'bg-white border-gray-300'
+            : 'border-gray-200'
           }`}
-        style={{ height: `${HEADER_HEIGHT}px` }}
+        style={{ height: `${HEADER_HEIGHT}px`, padding: '12px 40px', background: isDarkMode ? undefined : '#f9fafb', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
       >
         <p
-          className={`text-xs uppercase tracking-wide truncate select-text ${isDarkMode ? 'text-gray-400' : 'text-gray-500'
-            }`}
+          className={`text-sm font-semibold truncate select-text ${isDarkMode ? 'text-gray-300' : 'text-gray-900'}`}
         >
           {chapterTitle}
         </p>
+        <p className={`text-xs select-text ${isDarkMode ? 'text-gray-500' : 'text-gray-500'}`}>{pageNumber}</p>
       </div>
 
       {/* Content Area */}
       <div
-        className={`px-10 py-8 flex-1 ${isDarkMode ? 'bg-[#2A2A2A]' : 'bg-white'
-          }`}
+        className={`flex-1 ${isDarkMode ? 'bg-[#2A2A2A]' : 'bg-white'}`}
+        style={{ padding: '40px' }}
       >
         <div
           className={`book-content-text select-text ${isDarkMode ? 'dark-book-content' : ''}`}
@@ -3024,18 +3068,13 @@ function ContentPage({ page, pageIndex, highlights, chapterTitle, pageNumber, is
 
       {/* Footer */}
       <div
-        className={`flex-shrink-0 pt-4 pb-4 text-center border-t ${isDarkMode
+        className={`flex-shrink-0 border-t text-center ${isDarkMode
             ? 'bg-[#2A2A2A] border-gray-700'
-            : 'bg-white border-gray-200'
+            : 'border-gray-200'
           }`}
-        style={{ height: `${FOOTER_HEIGHT}px` }}
+        style={{ height: `${FOOTER_HEIGHT}px`, padding: '12px 0', background: isDarkMode ? undefined : '#f9fafb', fontSize: '12px', color: isDarkMode ? '#9ca3af' : '#6b7280' }}
       >
-        <span
-          className={`text-sm ${isDarkMode ? 'text-gray-500' : 'text-gray-400'
-            }`}
-        >
-          {pageNumber}
-        </span>
+        <span className="select-text">{chapterTitle}</span>
       </div>
     </div>
   );
