@@ -26,7 +26,6 @@ export function useSpeech({ currentPageIndex, allPages, isSinglePageMode, isFlip
     if (wasPlayingBeforeFlip && !isFlipping) {
       const timer = setTimeout(() => {
         startSpeaking();
-        setWasPlayingBeforeFlip(false);
       }, 700);
       return () => clearTimeout(timer);
     }
