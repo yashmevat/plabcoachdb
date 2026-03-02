@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import Mark from 'mark.js';
+import { useSpeech } from './useSpeech';
 
 export default function BookReaderPage() {
   const params = useParams();
@@ -23,7 +24,6 @@ export default function BookReaderPage() {
   const [flipDirection, setFlipDirection] = useState(null);
   const [bookOpened, setBookOpened] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
-  const [wasPlayingBeforeFlip, setWasPlayingBeforeFlip] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [dragStartX, setDragStartX] = useState(0);
   const [dragCurrentX, setDragCurrentX] = useState(0);
@@ -54,13 +54,6 @@ export default function BookReaderPage() {
   const [bookmarks, setBookmarks] = useState([]);
   const [showBookmarkModal, setShowBookmarkModal] = useState(false);
 
-  // Speech synthesis states
-  const [isSpeaking, setIsSpeaking] = useState(false);
-  const [isPaused, setIsPaused] = useState(false);
-  const [speechPageIndex, setSpeechPageIndex] = useState(null); // Track which page the speech is for
-  const speechRef = useRef(null);
-  const utteranceRef = useRef(null);
-
   // A4 EXACT dimensions at 96 DPI (matching author page: PAGE_WIDTH=794, PAGE_HEIGHT=1123)
   const A4_WIDTH = 794;
   const A4_HEIGHT = 1123;
@@ -76,6 +69,18 @@ export default function BookReaderPage() {
 
   // Compute slider fill percent for UI and update CSS custom property for font scaling
   const sliderFill = Math.round(((fontSize - FONT_MIN) / (FONT_MAX - FONT_MIN)) * 100);
+
+  // Helper to check if we're in single page mode (mobile OR desktop with single view)
+  const isSinglePageMode = () => isMobile || pageViewMode === 'single';
+
+  // Speech synthesis hook
+  const { isSpeaking, isPaused, wasPlayingBeforeFlip, setWasPlayingBeforeFlip, startSpeaking, pauseSpeaking, resumeSpeaking, stopSpeaking } = useSpeech({
+    currentPageIndex,
+    allPages,
+    isSinglePageMode,
+    isFlipping,
+    onAutoAdvance: () => nextPage?.(),
+  });
 
   // Helper: estimate scale applied by CSS transform on the container.
   const getScaleForElement = (el) => {
@@ -317,28 +322,6 @@ useEffect(() => {
     window.addEventListener('keydown', handleKeyPress);
     return () => window.removeEventListener('keydown', handleKeyPress);
   }, [currentPageIndex, allPages.length, bookOpened, isMobile]);
-
-  useEffect(() => {
-    return () => {
-      if (speechRef.current) {
-        window.speechSynthesis.cancel();
-      }
-    };
-  }, []);
-
-  // Replace your existing useEffect for currentPageIndex
-  useEffect(() => {
-    // If audio was playing before page flip, auto-resume on new page
-    if (wasPlayingBeforeFlip && !isFlipping) {
-      // Small delay to let page render completely
-      const timer = setTimeout(() => {
-        startSpeaking();
-        setWasPlayingBeforeFlip(false); // Reset flag
-      }, 700); // 700ms = 600ms flip animation + 100ms buffer
-
-      return () => clearTimeout(timer);
-    }
-  }, [currentPageIndex, isFlipping, wasPlayingBeforeFlip]);
 
   const fetchAllData = async () => {
     try {
@@ -1025,167 +1008,7 @@ const fetchBookmarks = async () => {
     }
   };
 
-  const getPageText = () => {
-    let text = '';
 
-    if (isSinglePageMode()) {
-      // Single page mode (mobile or desktop single view)
-      const page = allPages[currentPageIndex];
-      if (page) {
-        if (page.type === 'content' && page.content?.content) {
-          const tempDiv = document.createElement('div');
-          tempDiv.innerHTML = page.content.content;
-          text = tempDiv.textContent || tempDiv.innerText || '';
-        } else if (page.type === 'topic-title') {
-          text = page.content.name;
-        } else if (page.type === 'subtopic-title') {
-          text = page.content.name;
-        }
-      }
-    } else {
-      // Desktop double-page spread view
-      const leftPageIndex = currentPageIndex;
-      const rightPageIndex = currentPageIndex + 1;
-      const leftPage = allPages[leftPageIndex];
-      const rightPage = allPages[rightPageIndex];
-
-      if (leftPage) {
-        if (leftPage.type === 'content' && leftPage.content?.content) {
-          const tempDiv = document.createElement('div');
-          tempDiv.innerHTML = leftPage.content.content;
-          const leftText = tempDiv.textContent || tempDiv.innerText || '';
-          if (leftText.trim()) {
-            text += leftText + '\n\n';
-          }
-        } else if (leftPage.type === 'chapter-title') {
-          text += leftPage.content.title + '\n\n';
-        }
-      }
-
-      if (rightPage) {
-        if (rightPage.type === 'content' && rightPage.content?.content) {
-          const tempDiv = document.createElement('div');
-          tempDiv.innerHTML = rightPage.content.content;
-          const rightText = tempDiv.textContent || tempDiv.innerText || '';
-          if (rightText.trim()) {
-            text += rightText;
-          }
-        } else if (rightPage.type === 'chapter-title') {
-          text += rightPage.content.title;
-        }
-      }
-    }
-
-    return text.trim();
-  };
-
-  const startSpeaking = () => {
-    if (!window.speechSynthesis) {
-      alert('Speech synthesis not supported in your browser');
-      return;
-    }
-
-    const text = getPageText();
-    if (!text.trim()) {
-      alert('No text content available on this page');
-      setWasPlayingBeforeFlip(false); // Reset if no content
-      return;
-    }
-
-    // Cancel any existing speech and reset states
-    window.speechSynthesis.cancel();
-    setIsSpeaking(false);
-    setIsPaused(false);
-
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = 'en-US';
-    utterance.rate = 1.0;
-    utterance.pitch = 1.0;
-    utterance.volume = 1.0;
-
-    utterance.onstart = () => {
-      setIsSpeaking(true);
-      setIsPaused(false);
-      setSpeechPageIndex(currentPageIndex); // Track current page when speech starts
-    };
-
-    utterance.onend = () => {
-      setIsSpeaking(false);
-      setIsPaused(false);
-      setSpeechPageIndex(null);
-
-      const maxIndex = isSinglePageMode() ? allPages.length - 1 : allPages.length - 2;
-      if (currentPageIndex < maxIndex) {
-        // Mark that we want to continue playing on next page
-        setWasPlayingBeforeFlip(true);
-
-        setTimeout(() => {
-          nextPage();
-        }, 500);
-      } else {
-        // Last page - stop completely
-        setWasPlayingBeforeFlip(false);
-      }
-    };
-
-    utterance.onerror = (event) => {
-      console.log('Speech error:', event);
-      setIsSpeaking(false);
-      setIsPaused(false);
-      setSpeechPageIndex(null);
-      setWasPlayingBeforeFlip(false); // Reset on error
-    };
-
-    utteranceRef.current = utterance;
-    window.speechSynthesis.speak(utterance);
-  };
-
-
-  const pauseSpeaking = () => {
-    if (window.speechSynthesis.speaking) {
-      window.speechSynthesis.pause();
-      setIsPaused(true);
-      setSpeechPageIndex(currentPageIndex); // Remember which page we paused on
-    }
-  };
-
-  const resumeSpeaking = () => {
-    // Check if page has changed since speech was paused
-    if (speechPageIndex !== null && speechPageIndex !== currentPageIndex) {
-      // Page changed, start new speech for current page
-      stopSpeaking(false);
-      setTimeout(() => {
-        startSpeaking();
-      }, 100);
-    } else if (window.speechSynthesis.paused) {
-      // Same page, just resume
-      window.speechSynthesis.resume();
-      setIsPaused(false);
-    } else {
-      // Not paused, start fresh
-      startSpeaking();
-    }
-  };
-
-  const stopSpeaking = (shouldResume = false) => {
-    window.speechSynthesis.cancel();
-    setIsSpeaking(false);
-    setIsPaused(false);
-    setSpeechPageIndex(null);
-
-    // Track if we should auto-resume after page flip
-    if (shouldResume) {
-      setWasPlayingBeforeFlip(true);
-    } else {
-      setWasPlayingBeforeFlip(false);
-    }
-  };
-
-
-  // Helper to check if we're in single page mode (mobile OR desktop with single view)
-  const isSinglePageMode = () => {
-    return isMobile || pageViewMode === 'single';
-  };
 
   const togglePageViewMode = () => {
     const newMode = pageViewMode === 'double' ? 'single' : 'double';
@@ -2724,7 +2547,7 @@ function CoverPage({ book }) {
           </div>
 
           {/* Title */}
-          <h1 className="text-5xl font-bold leading-tight px-6 select-text">
+          <h1 className="text-xl font-bold leading-tight px-6 select-text">
             {book?.title || 'Smart Notes'}
           </h1>
 
@@ -2804,10 +2627,10 @@ function TableOfContents({ chapters, chapterPageMap, topicPageMap, subtopicPageM
                       e.stopPropagation();
                       if (topicPageIndex !== undefined) onChapterClick(topicPageIndex);
                     }}
-                    className="flex-1 text-left py-4 pr-4"
+                    className="flex-1 text-left p-1"
                   >
                     <div className="space-y-0.5">
-                      <h3 className="font-bold text-base text-blue-900 select-text">
+                      <h3 className="font-bold text-sm text-blue-900 select-text">
                         {topicIndex + 1}. {topic.name}
                       </h3>
                       {topic.description && (

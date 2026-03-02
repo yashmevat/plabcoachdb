@@ -38,7 +38,7 @@ export default function PagesPage() {
   const initializedEditors = useRef(new Set());
   const reflowTimeout = useRef(null);
   const topRef = useRef(null);
-  const isPasteSplit = useRef(false); // true while paste-triggered reflow is in progress
+  const isPasteSplit = useRef({}); // per-page: { 0: true, 1: false, ... } — true while paste-triggered reflow is in progress
 
   // ✅ FIX 1: Always-fresh ref for livePages — solves stale closure in initQuill
   const livePagesRef = useRef(livePages);
@@ -460,8 +460,13 @@ useEffect(() => {
     });
 
     // ✅ FIX: Use livePagesRef so content is always fresh even after re-inits
+    // Block text-change undo while content is being loaded into the editor
     if (livePagesRef.current[index]?.content) {
+      isPasteSplit.current[index] = true;
       quill.root.innerHTML = livePagesRef.current[index].content;
+      setTimeout(() => {
+        isPasteSplit.current[index] = false;
+      }, 600); // must be > THROTTLE_DELAY (500ms)
     }
 
     // ⚡ OPTIMIZATION 3: Throttled text-change handler
@@ -477,7 +482,7 @@ useEffect(() => {
         const contentHeight = getContentHeight(currentContent);
 
         if (contentHeight > EFFECTIVE_CONTENT_HEIGHT) {
-          isPasteSplit.current = true; // block text-change undo during this reflow
+          isPasteSplit.current[index] = true; // block text-change undo during this reflow
           setSplitting(true);
 
           const currentPages = livePagesRef.current;
@@ -504,7 +509,10 @@ useEffect(() => {
           setLivePages(newPages);
 
           setTimeout(() => {
-            isPasteSplit.current = false; // allow text-change undo again
+            // Release all pages — new editors will have set their own flags
+            Object.keys(isPasteSplit.current).forEach(k => {
+              isPasteSplit.current[k] = false;
+            });
             setSplitting(false);
             const toast = document.createElement('div');
             const newPagesCount = newPages.length - index;
@@ -532,32 +540,8 @@ useEffect(() => {
       textChangeTimeout = setTimeout(() => {
         const content = quill.root.innerHTML;
 
-        // Skip overflow-undo if a paste-triggered reflow is already handling this
-        if (isPasteSplit.current) return;
-
-        // Use quill.root.scrollHeight — true rendered height with all Quill CSS
-        // (font-size classes, bold, images, etc.) applied. No subtraction needed.
-        if (quill.root.scrollHeight > CONTENT_HEIGHT) {
-          // Undo the change that caused overflow
-          quill.history.undo();
-
-          // Show red warning toast
-          const existing = document.getElementById('page-full-toast');
-          if (existing) existing.remove();
-          const toast = document.createElement('div');
-          toast.id = 'page-full-toast';
-          toast.textContent = '⚠️ Page is full! Please add a new page.';
-          toast.style.cssText = `
-            position: fixed; bottom: 24px; right: 24px; z-index: 9999;
-            background: #dc2626; color: white; padding: 12px 20px;
-            border-radius: 8px; font-size: 14px; font-weight: 600;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-            transition: opacity 0.4s ease;
-          `;
-          document.body.appendChild(toast);
-          setTimeout(() => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 400); }, 2500);
-          return;
-        }
+        // Skip if paste-triggered reflow is already handling this page
+        if (isPasteSplit.current[index]) return;
 
         const contentHeight = getContentHeight(content);
         const fillPercentage = Math.min(100, Math.max(0, Math.round((contentHeight / EFFECTIVE_CONTENT_HEIGHT) * 100)));
@@ -605,12 +589,13 @@ useEffect(() => {
   };
 
   const addNewPage = () => {
+    const newIndex = livePages.length; // capture before setState to avoid stale closure
     const newPage = { id: `page-${Date.now()}`, content: '', existingPageId: null };
     setLivePages(prev => [...prev, newPage]);
     setEditingPageId(null);
     setTimeout(() => {
-      initQuill(livePages.length);
-      setSelectedPageIndex(livePages.length);
+      initQuill(newIndex);
+      setSelectedPageIndex(newIndex);
     }, 200);
   };
 
