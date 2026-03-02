@@ -950,7 +950,8 @@ const fetchBookmarks = async () => {
       allPagesData.push({ type: 'cover', content: null });
 
       const tocIndex = allPagesData.length;
-      allPagesData.push({ type: 'toc', content: topicsList, topicPageMap: {}, subtopicPageMap: {} });
+      const topicSubtopicsMap = {};
+      allPagesData.push({ type: 'toc', content: topicsList, topicPageMap: {}, subtopicPageMap: {}, topicSubtopicsMap: {} });
 
       for (const topic of topicsList) {
         // Mark topic start position
@@ -983,6 +984,7 @@ const fetchBookmarks = async () => {
         const subtopicsData = await subtopicsRes.json();
 
         if (subtopicsData.success && subtopicsData.data.length > 0) {
+          topicSubtopicsMap[topic.id] = subtopicsData.data;
           for (const subtopic of subtopicsData.data) {
             // Mark subtopic start position
             subtopicPageMap[subtopic.id] = allPagesData.length;
@@ -1015,6 +1017,7 @@ const fetchBookmarks = async () => {
       allPagesData.push({ type: 'back-cover', content: null });
       allPagesData[tocIndex].topicPageMap = topicPageMap;
       allPagesData[tocIndex].subtopicPageMap = subtopicPageMap;
+      allPagesData[tocIndex].topicSubtopicsMap = topicSubtopicsMap;
 
       setAllPages(allPagesData);
     } catch (error) {
@@ -1417,7 +1420,7 @@ const fetchBookmarks = async () => {
   /*removing default margins */
   .book-content-text p {
     font-size: calc(15px * var(--font-scale, 1));
-     margin-bottom: 0em !important; 
+     margin-bottom: 0.2em !important; 
      display: block !important;
 }
 .book-content-text img {
@@ -1430,10 +1433,10 @@ const fetchBookmarks = async () => {
 }
 
 .book-content-text ul, .book-content-text ol {
-    font-size: calc(16px * var(--font-scale, 1));
-    margin-bottom: 0em !important;
-    margin-left:0em !important;
-    padding-left: 0em !important;
+    // font-size: calc(16px * var(--font-scale, 1));
+    margin-bottom: 0.2em !important;
+    // margin-left:0em !important;
+    // padding-left: 0em !important;
 }
 
 .book-content-text li {
@@ -2005,6 +2008,41 @@ const fetchBookmarks = async () => {
 
 
   <div className={`min-h-screen transition-colors duration-300 ${isDarkMode ? 'bg-[#1A1A1A]' : 'bg-[#F4F1EA]'}`}>
+
+        {/* Previous Button - Fixed Left Side */}
+        {canGoPrevious() && bookOpened && !isMobile && (
+          <button
+            onClick={goToPreviousPage}
+            disabled={isFlipping}
+            className={`hidden lg:block fixed left-[0.5%] top-[150px] xl:left-[5%] xl:top-[150px] 2xl:left-[10%] 2xl:top-[150px] p-4 rounded-full shadow-lg transition-all hover:scale-110 disabled:opacity-50 disabled:cursor-not-allowed z-[9999] ${
+              isDarkMode ? 'bg-gray-800 text-white hover:bg-gray-700' : 'bg-white text-gray-800 hover:bg-gray-50'
+            }`}
+            style={{ filter: 'none', WebkitFilter: 'none' }}
+            title="Previous Page"
+          >
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            </svg>
+          </button>
+        )}
+
+        {/* Next Button - Fixed Right Side */}
+        {canGoNext() && bookOpened && !isMobile && (
+          <button
+            onClick={goToNextPage}
+            disabled={isFlipping}
+            className={`hidden lg:block fixed right-[0.5%] top-[150px] xl:right-[5%] xl:top-[150px] 2xl:right-[10%] 2xl:top-[150px] p-4 rounded-full shadow-lg transition-all hover:scale-110 disabled:opacity-50 disabled:cursor-not-allowed z-[9999] ${
+              isDarkMode ? 'bg-gray-800 text-white hover:bg-gray-700' : 'bg-white text-gray-800 hover:bg-gray-50'
+            }`}
+            style={{ filter: 'none', WebkitFilter: 'none' }}
+            title="Next Page"
+          >
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+            </svg>
+          </button>
+        )}
+
         {/* Top Navbar - Fully Responsive */}
         <div className={`sticky top-0 z-50 transition-colors duration-300 shadow-sm ${isDarkMode ? 'bg-[#2A2A2A] border-b border-gray-700' : 'bg-white border-b border-gray-200'}`}>
           <div className="max-w-full mx-auto px-2 sm:px-4 md:px-6 py-2 md:py-3">
@@ -2355,39 +2393,7 @@ const fetchBookmarks = async () => {
                   </div>
                 )}
 
-                {/* Previous Button - Left Side */}
-                {canGoPrevious() && bookOpened && !isMobile && (
-                  <button
-                    onClick={goToPreviousPage}
-                    disabled={isFlipping}
-                    className={`hidden lg:block absolute left-[-80px] top-[150px] p-4 rounded-full shadow-lg transition-all hover:scale-110 disabled:opacity-50 disabled:cursor-not-allowed z-10 ${
-                      isDarkMode ? 'bg-gray-800 text-white hover:bg-gray-700' : 'bg-white text-gray-800 hover:bg-gray-50'
-                    }`}
-                    style={{ filter: 'none', WebkitFilter: 'none' }}
-                    title="Previous Page"
-                  >
-                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                    </svg>
-                  </button>
-                )}
 
-                {/* Next Button - Right Side */}
-                {canGoNext() && bookOpened && !isMobile && (
-                  <button
-                    onClick={goToNextPage}
-                    disabled={isFlipping}
-                    className={`hidden lg:block absolute right-[-80px] top-[150px] p-4 rounded-full shadow-lg transition-all hover:scale-110 disabled:opacity-50 disabled:cursor-not-allowed z-10 ${
-                      isDarkMode ? 'bg-gray-800 text-white hover:bg-gray-700' : 'bg-white text-gray-800 hover:bg-gray-50'
-                    }`}
-                    style={{ filter: 'none', WebkitFilter: 'none' }}
-                    title="Next Page"
-                  >
-                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                    </svg>
-                  </button>
-                )}
               </div>
               <p className={`text-center mt-6 text-lg ${isDarkMode ? 'text-white' : 'text-black'}`}>
                 Drag to Flip Pages
@@ -2673,6 +2679,7 @@ function PageContent({ page, pageIndex, pageNumber, highlights, onChapterClick, 
         chapterPageMap={page.chapterPageMap}
         topicPageMap={page.topicPageMap}
         subtopicPageMap={page.subtopicPageMap}
+        topicSubtopicsMap={page.topicSubtopicsMap}
         onChapterClick={onChapterClick}
       />
     );
@@ -2748,9 +2755,10 @@ function CoverPage({ book }) {
 }
 
 
-function TableOfContents({ chapters, chapterPageMap, topicPageMap, subtopicPageMap, onChapterClick }) {
-  const topics = chapters; // chapters is actually topics now
-  
+function TableOfContents({ chapters, chapterPageMap, topicPageMap, subtopicPageMap, topicSubtopicsMap, onChapterClick }) {
+  const topics = chapters;
+  const [openTopicId, setOpenTopicId] = useState(null);
+
   return (
     <div className="page-inner bg-white" style={{height: '100%'}}>
       {/* Header */}
@@ -2765,32 +2773,90 @@ function TableOfContents({ chapters, chapterPageMap, topicPageMap, subtopicPageM
         <div className="space-y-0">
           {topics.map((topic, topicIndex) => {
             const topicPageIndex = topicPageMap?.[topic.id];
+            const subtopics = topicSubtopicsMap?.[topic.id] || [];
+            const isOpen = openTopicId === topic.id;
+
             return (
               <div key={topic.id} className="border-b border-gray-200 last:border-b-0">
-                {/* Topic Header */}
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (topicPageIndex !== undefined) {
-                      onChapterClick(topicPageIndex);
-                    }
-                  }}
-                  className="w-full text-left p-6 hover:bg-blue-50 transition-all cursor-pointer bg-blue-50/50"
-                >
-                  <div className="space-y-2">
-                    <h3 className="font-bold text-lg text-blue-900 select-text">
-                      Topic {topicIndex + 1}: {topic.name}
-                    </h3>
-                    {topic.description && (
-                      <p className="text-sm text-gray-600 select-text">
-                        {topic.description}
+                {/* Topic Header Row */}
+                <div className="flex items-center bg-blue-50/50 hover:bg-blue-50 transition-all">
+                  {/* Expand/collapse toggle */}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setOpenTopicId(isOpen ? null : topic.id);
+                    }}
+                    className="flex-shrink-0 w-10 flex items-center justify-center self-stretch text-blue-600 hover:text-blue-800"
+                    title={isOpen ? 'Collapse' : 'Expand'}
+                  >
+                    <svg
+                      className="w-4 h-4 transition-transform duration-200"
+                      style={{ transform: isOpen ? 'rotate(90deg)' : 'rotate(0deg)' }}
+                      fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                    </svg>
+                  </button>
+
+                  {/* Topic title — click to navigate */}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (topicPageIndex !== undefined) onChapterClick(topicPageIndex);
+                    }}
+                    className="flex-1 text-left py-4 pr-4"
+                  >
+                    <div className="space-y-0.5">
+                      <h3 className="font-bold text-base text-blue-900 select-text">
+                        {topicIndex + 1}. {topic.name}
+                      </h3>
+                      {topic.description && (
+                        <p className="text-xs text-gray-500 select-text line-clamp-1">{topic.description}</p>
+                      )}
+                      <p className="text-xs text-blue-500 font-medium">
+                        {subtopics.length} subtopic{subtopics.length !== 1 ? 's' : ''}
                       </p>
-                    )}
-                    <div className="text-sm text-blue-600 font-medium">
-                      Page {topicPageIndex + 1} • {topic.subtopic_count || 0} Subtopics
                     </div>
+                  </button>
+
+                  {/* Page number */}
+                  {topicPageIndex !== undefined && (
+                    <span className="flex-shrink-0 pr-4 text-xs text-gray-400 font-medium">
+                      p.{topicPageIndex + 1}
+                    </span>
+                  )}
+                </div>
+
+                {/* Subtopics accordion */}
+                {isOpen && subtopics.length > 0 && (
+                  <div className="bg-gray-50 border-t border-gray-100">
+                    {subtopics.map((subtopic, subIndex) => {
+                      const subtopicPageIndex = subtopicPageMap?.[subtopic.id];
+                      return (
+                        <button
+                          key={subtopic.id}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (subtopicPageIndex !== undefined) onChapterClick(subtopicPageIndex);
+                          }}
+                          className="w-full flex items-center justify-between px-6 py-2.5 text-left hover:bg-blue-50 transition-colors border-b border-gray-100 last:border-b-0"
+                        >
+                          <div className="flex items-center gap-3">
+                            <span className="w-5 h-5 rounded-full bg-blue-100 text-blue-700 text-[10px] font-bold flex items-center justify-center flex-shrink-0">
+                              {subIndex + 1}
+                            </span>
+                            <span className="text-sm text-gray-800 select-text">{subtopic.name}</span>
+                          </div>
+                          {subtopicPageIndex !== undefined && (
+                            <span className="text-xs text-gray-400 font-medium flex-shrink-0 ml-2">
+                              p.{subtopicPageIndex + 1}
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
                   </div>
-                </button>
+                )}
               </div>
             );
           })}

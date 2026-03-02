@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
@@ -38,6 +38,7 @@ export default function PagesPage() {
   const initializedEditors = useRef(new Set());
   const reflowTimeout = useRef(null);
   const topRef = useRef(null);
+  const isPasteSplit = useRef(false); // true while paste-triggered reflow is in progress
 
   // ✅ FIX 1: Always-fresh ref for livePages — solves stale closure in initQuill
   const livePagesRef = useRef(livePages);
@@ -238,6 +239,52 @@ useEffect(() => {
         continue;
       }
 
+      // Handle lists (ul/ol) — split li-by-li so we never break inside an <li>
+      if (tagName === 'ul' || tagName === 'ol') {
+        let listAttrs = '';
+        for (let attr of block.attributes) {
+          listAttrs += ` ${attr.name}="${attr.value}"`;
+        }
+
+        const items = Array.from(block.querySelectorAll(':scope > li'));
+        let listBuffer = ''; // accumulated outerHTML of <li> items
+
+        for (let li of items) {
+          const liHTML = li.outerHTML;
+          const testListHTML = `<${tagName}${listAttrs}>${listBuffer}${liHTML}</${tagName}>`;
+          const testHeight = getContentHeight(currentPageHTML + testListHTML);
+
+          if (testHeight > EFFECTIVE_CONTENT_HEIGHT) {
+            if (listBuffer) {
+              // flush accumulated items to current page, start new page with this li
+              const listHTML = `<${tagName}${listAttrs}>${listBuffer}</${tagName}>`;
+              pages.push((currentPageHTML + listHTML).trim());
+              currentPageHTML = '';
+              currentHeight = 0;
+              listBuffer = liHTML;
+            } else {
+              // single <li> is too tall — push current page first, then start fresh
+              if (currentPageHTML.trim()) {
+                pages.push(currentPageHTML.trim());
+                currentPageHTML = '';
+                currentHeight = 0;
+              }
+              listBuffer = liHTML;
+            }
+          } else {
+            listBuffer += liHTML;
+          }
+        }
+
+        // flush any remaining list items
+        if (listBuffer) {
+          const listHTML = `<${tagName}${listAttrs}>${listBuffer}</${tagName}>`;
+          currentPageHTML += listHTML;
+          currentHeight = getContentHeight(currentPageHTML);
+        }
+        continue;
+      }
+
       let blockAttrs = '';
       for (let attr of block.attributes) {
         blockAttrs += ` ${attr.name}="${attr.value}"`;
@@ -430,6 +477,7 @@ useEffect(() => {
         const contentHeight = getContentHeight(currentContent);
 
         if (contentHeight > EFFECTIVE_CONTENT_HEIGHT) {
+          isPasteSplit.current = true; // block text-change undo during this reflow
           setSplitting(true);
 
           const currentPages = livePagesRef.current;
@@ -456,6 +504,7 @@ useEffect(() => {
           setLivePages(newPages);
 
           setTimeout(() => {
+            isPasteSplit.current = false; // allow text-change undo again
             setSplitting(false);
             const toast = document.createElement('div');
             const newPagesCount = newPages.length - index;
@@ -482,6 +531,9 @@ useEffect(() => {
 
       textChangeTimeout = setTimeout(() => {
         const content = quill.root.innerHTML;
+
+        // Skip overflow-undo if a paste-triggered reflow is already handling this
+        if (isPasteSplit.current) return;
 
         // Use quill.root.scrollHeight — true rendered height with all Quill CSS
         // (font-size classes, bold, images, etc.) applied. No subtraction needed.
