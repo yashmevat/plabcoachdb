@@ -58,41 +58,99 @@ export default function TopicPagesPage() {
   const measureHeight = useRef(null);
 
   useEffect(() => {
+    // Wrap measurement div inside .ql-snow > .ql-container > .ql-editor so that
+    // ALL Quill CSS rules (paragraph margins, heading sizes, list indents, etc.)
+    // apply to it exactly as they do inside a real editor — key fix for
+    // empty-page / overflow bugs caused by height mismatch.
+    const wrapperDiv = document.createElement('div');
+    wrapperDiv.className = 'ql-snow';
+    wrapperDiv.style.cssText = `position:absolute;visibility:hidden;left:-9999px;top:0;width:${PAGE_WIDTH}px;pointer-events:none;`;
+
+    const containerDiv = document.createElement('div');
+    containerDiv.className = 'ql-container';
+    containerDiv.style.cssText = 'height:auto!important;overflow:visible!important;max-height:none!important;';
+
     const measureDiv = document.createElement('div');
     measureDiv.id = 'height-measure-div-topic';
-    measureDiv.style.cssText = `
-      position: absolute;
-      visibility: hidden;
-      left: -9999px;
-      top: 0;
-      width: ${CONTENT_WIDTH}px;
-      padding: 0;
-      margin: 0;
-      border: none;
-      font-size: 16px;
-      line-height: 1.6;
-      font-family: Arial, sans-serif;
-      word-wrap: break-word;
-      overflow-wrap: break-word;
-      white-space: normal;
-      box-sizing: border-box;
-    `;
-    document.body.appendChild(measureDiv);
+    measureDiv.className = 'ql-editor';
+    measureDiv.style.cssText = `width:${CONTENT_WIDTH}px;height:auto!important;max-height:none!important;overflow:visible!important;`;
+
+    containerDiv.appendChild(measureDiv);
+    wrapperDiv.appendChild(containerDiv);
+    document.body.appendChild(wrapperDiv);
     measureHeight.current = measureDiv;
+
     return () => {
-      if (measureHeight.current && document.body.contains(measureHeight.current)) {
-        document.body.removeChild(measureHeight.current);
+      if (wrapperDiv && document.body.contains(wrapperDiv)) {
+        document.body.removeChild(wrapperDiv);
       }
     };
   }, []);
 
+  // NOTE: Because the measure div is a real .ql-editor, it inherits Quill's
+  // `padding: 40px !important`. scrollHeight includes that padding, so we
+  // subtract it to get net content height (matching EFFECTIVE_CONTENT_HEIGHT).
   const getContentHeight = (html) => {
     if (!html || html.trim() === '' || html === '<p><br></p>') return 0;
     if (measureHeight.current) {
       measureHeight.current.innerHTML = html;
-      return measureHeight.current.scrollHeight || 0;
+      const style = window.getComputedStyle(measureHeight.current);
+      const pt = parseFloat(style.paddingTop) || 0;
+      const pb = parseFloat(style.paddingBottom) || 0;
+      const height = (measureHeight.current.scrollHeight || 0) - pt - pb;
+      measureHeight.current.innerHTML = '';
+      return height;
     }
     return 0;
+  };
+
+  // Preload all <img> srcs in an HTML string so the browser caches their
+  // dimensions before getContentHeight runs — prevents 0px image heights
+  const preloadImages = (html) => {
+    return new Promise((resolve) => {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(html, 'text/html');
+      const imgs = Array.from(doc.querySelectorAll('img'));
+      if (imgs.length === 0) return resolve();
+      let count = 0;
+      const done = () => { if (++count >= imgs.length) resolve(); };
+      imgs.forEach((img) => {
+        const src = img.getAttribute('src');
+        if (!src) { done(); return; }
+        const image = new window.Image();
+        image.onload = done;
+        image.onerror = done;
+        image.src = src;
+      });
+    });
+  };
+
+  // Async height measurement: sets innerHTML, waits for every <img> in the
+  // measureDiv to finish layout (onload/onerror), then reads scrollHeight.
+  // Fixes 0px image height bug that causes page overflow after paste.
+  const getContentHeightAsync = (html) => {
+    return new Promise((resolve) => {
+      if (!html || html.trim() === '' || html === '<p><br></p>') return resolve(0);
+      if (!measureHeight.current) return resolve(0);
+      measureHeight.current.innerHTML = html;
+      const imgs = Array.from(measureHeight.current.querySelectorAll('img'));
+      const measure = () => {
+        const style = window.getComputedStyle(measureHeight.current);
+        const pt = parseFloat(style.paddingTop) || 0;
+        const pb = parseFloat(style.paddingBottom) || 0;
+        const height = (measureHeight.current.scrollHeight || 0) - pt - pb;
+        measureHeight.current.innerHTML = '';
+        resolve(height);
+      };
+      if (imgs.length === 0) return measure();
+      let loaded = 0;
+      const onDone = () => { if (++loaded >= imgs.length) measure(); };
+      imgs.forEach(img => {
+        if (img.complete && img.naturalHeight > 0) { onDone(); return; }
+        img.addEventListener('load', onDone, { once: true });
+        img.addEventListener('error', onDone, { once: true });
+      });
+    });
   };
 
  useEffect(() => {
@@ -182,7 +240,7 @@ export default function TopicPagesPage() {
     }
   };
 
-  const splitContentIntoPages = (htmlContent) => {
+  const splitContentIntoPages = async (htmlContent) => {
     const pages = [];
     const parser = new DOMParser();
     const doc = parser.parseFromString(`<div>${htmlContent}</div>`, 'text/html');
@@ -195,12 +253,12 @@ export default function TopicPagesPage() {
       const block = blocks[blockIdx];
       const tagName = block.tagName.toLowerCase();
 
-      // Handle blocks containing images — measure actual rendered height
-      if (block.querySelector('img')) {
+      // Handle blocks containing images — measure actual rendered height.
+      // Exclude ul/ol: lists are split li-by-li below so images inside <li> are handled there.
+      if (block.querySelector('img') && tagName !== 'ul' && tagName !== 'ol') {
         const blockHTML = block.outerHTML;
-        measureHeight.current.innerHTML = blockHTML;
-        const blockRenderedHeight = measureHeight.current.scrollHeight || 0;
-        measureHeight.current.innerHTML = '';
+        // Use getContentHeightAsync so we wait for image layout before reading scrollHeight
+        const blockRenderedHeight = await getContentHeightAsync(blockHTML);
 
         if (currentHeight + blockRenderedHeight > EFFECTIVE_CONTENT_HEIGHT) {
           if (currentPageHTML.trim()) pages.push(currentPageHTML.trim());
@@ -230,6 +288,50 @@ export default function TopicPagesPage() {
         } else {
           currentPageHTML += tableHTML;
           currentHeight += tableHeight;
+        }
+        continue;
+      }
+
+      // Handle lists (ul/ol) — split li-by-li so we never break inside an <li>
+      // getContentHeightAsync is used so images inside <li> are fully laid out before measuring
+      if (tagName === 'ul' || tagName === 'ol') {
+        let listAttrs = '';
+        for (let attr of block.attributes) {
+          listAttrs += ` ${attr.name}="${attr.value}"`;
+        }
+
+        const items = Array.from(block.querySelectorAll(':scope > li'));
+        let listBuffer = '';
+
+        for (let li of items) {
+          const liHTML = li.outerHTML;
+          const testListHTML = `<${tagName}${listAttrs}>${listBuffer}${liHTML}</${tagName}>`;
+          const testHeight = await getContentHeightAsync(currentPageHTML + testListHTML);
+
+          if (testHeight > EFFECTIVE_CONTENT_HEIGHT) {
+            if (listBuffer) {
+              const listHTML = `<${tagName}${listAttrs}>${listBuffer}</${tagName}>`;
+              pages.push((currentPageHTML + listHTML).trim());
+              currentPageHTML = '';
+              currentHeight = 0;
+              listBuffer = liHTML;
+            } else {
+              if (currentPageHTML.trim()) {
+                pages.push(currentPageHTML.trim());
+                currentPageHTML = '';
+                currentHeight = 0;
+              }
+              listBuffer = liHTML;
+            }
+          } else {
+            listBuffer += liHTML;
+          }
+        }
+
+        if (listBuffer) {
+          const listHTML = `<${tagName}${listAttrs}>${listBuffer}</${tagName}>`;
+          currentPageHTML += listHTML;
+          currentHeight = await getContentHeightAsync(currentPageHTML);
         }
         continue;
       }
@@ -321,7 +423,7 @@ export default function TopicPagesPage() {
   // ── FORWARD REFLOW ───────────────────────────────────────────────────────
   // Pages before `index` are never touched. Content of page `index` + all
   // subsequent pages is merged, re-split, and written back from `index` onward.
-  const forwardReflow = (index, newContent, allPages) => {
+  const forwardReflow = async (index, newContent, allPages) => {
     let tailContent = '';
     for (let i = index + 1; i < allPages.length; i++) {
       const c = allPages[i].content || '';
@@ -329,7 +431,7 @@ export default function TopicPagesPage() {
     }
 
     const merged = newContent + tailContent;
-    const splitResult = splitContentIntoPages(merged);
+    const splitResult = await splitContentIntoPages(merged);
 
     const newPages = allPages.slice(0, index).map(p => ({ ...p }));
     splitResult.forEach((pageContent, i) => {
@@ -410,25 +512,42 @@ export default function TopicPagesPage() {
       quill.root.innerHTML = livePagesRef.current[index].content;
     }
 
-    // clipboard.addMatcher — forward-reflow on paste
+    // addMatcher fires once PER ELEMENT during a paste operation.
+    // Debouncing ensures only one reflow fires after the full paste lands,
+    // preventing race conditions that cause empty/duplicated pages.
+    let pasteReflowTimeout = null;
     quill.clipboard.addMatcher(Node.ELEMENT_NODE, (node, delta) => {
-      setTimeout(() => {
+      if (pasteReflowTimeout) clearTimeout(pasteReflowTimeout);
+      pasteReflowTimeout = setTimeout(async () => {
+        pasteReflowTimeout = null;
         const currentContent = quill.root.innerHTML;
+        // Wait for all images to load so heights are measured correctly
+        await preloadImages(currentContent);
         const contentHeight = getContentHeight(currentContent);
 
         if (contentHeight > EFFECTIVE_CONTENT_HEIGHT) {
           setSplitting(true);
-          const { newPages, firstContent } = forwardReflow(
+          const currentPages = livePagesRef.current;
+          const { newPages, firstContent } = await forwardReflow(
             index,
             currentContent,
-            livePagesRef.current
+            currentPages
           );
 
           quill.root.innerHTML = firstContent || '<p><br></p>';
           updatePageContent(index, firstContent || '<p><br></p>');
 
-          // Clear stale editor instances for slots that will be re-rendered
-          for (let i = index + 1; i < newPages.length; i++) {
+          // Clear stale editor instances for all pages after index
+          for (let i = index + 1; i < currentPages.length; i++) {
+            initializedEditors.current.delete(`editor-${i}`);
+            const c = document.getElementById(`editor-${i}`);
+            if (c?.parentNode) {
+              const tb = c.parentNode.querySelector('.ql-toolbar');
+              if (tb) tb.remove();
+            }
+            delete quillRefs.current[i];
+          }
+          for (let i = currentPages.length; i < newPages.length; i++) {
             initializedEditors.current.delete(`editor-${i}`);
           }
           setLivePages(newPages);
@@ -436,7 +555,8 @@ export default function TopicPagesPage() {
           setTimeout(() => {
             setSplitting(false);
             const toast = document.createElement('div');
-            toast.textContent = `✅ Content split into ${newPages.length} A4 pages!`;
+            const newPagesCount = newPages.length - index;
+            toast.textContent = `✅ Content reflowed across ${newPagesCount} page${newPagesCount > 1 ? 's' : ''} (pages ${index + 1}–${newPages.length})!`;
             toast.style.cssText = `
               position:fixed;bottom:24px;right:24px;z-index:9999;
               background:#166534;color:white;padding:12px 20px;
@@ -447,7 +567,7 @@ export default function TopicPagesPage() {
             setTimeout(() => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 400); }, 2500);
           }, 500);
         }
-      }, 100);
+      }, 250); // debounce: wait until all paste elements are processed
 
       return delta;
     });

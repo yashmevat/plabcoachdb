@@ -296,7 +296,6 @@ body {
 .book-content-text img {
   max-width: 100%;
   height: auto;
-  max-height: 250px;
   display: block;
   margin: 1em auto;
   border-radius: 8px;

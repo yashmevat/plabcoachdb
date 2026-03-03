@@ -1250,7 +1250,6 @@ const fetchBookmarks = async () => {
     border-radius: 0px !important;
     max-width: 100%;
     height: auto;
-    max-height: 250px;
     margin: 1em auto;
     display: block;
 }
