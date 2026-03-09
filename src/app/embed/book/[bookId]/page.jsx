@@ -266,7 +266,13 @@ useEffect(() => {
 
     window.addEventListener('message', handleMessage);
 
-    // ── Keep pinging parent with IFRAME_READY until auth succeeds ──
+    // ── Drain early-captured messages (arrived before React hydrated) ──
+    // The layout's inline script stores them in window.__earlyAuthMessages.
+    // Process them now that our handler is registered.
+    if (Array.isArray(window.__earlyAuthMessages)) {
+      const buffered = window.__earlyAuthMessages.splice(0);
+      buffered.forEach(e => handleMessage(e));
+    }
     // Single send is not enough — in SPA navigations the parent's message
     // listener may not be registered yet when the first ping fires.
     // We retry every 300ms for up to 10 seconds, then give up.
