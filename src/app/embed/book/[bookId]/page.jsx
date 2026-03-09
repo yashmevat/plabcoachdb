@@ -1333,16 +1333,37 @@ const fetchBookmarks = async () => {
     handleMouseUp(e);
   };
 
-  if (loading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900">
+if (loading) {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-[#0f172a] via-[#1e1b4b] to-[#0f172a]">
+      <div className="flex flex-col items-center gap-6">
+        {/* Outer ring */}
+        <div className="relative h-20 w-20">
+          <div className="absolute inset-0 rounded-full border-4 border-white/10"></div>
+          <div className="absolute inset-0 animate-spin rounded-full border-4 border-transparent border-t-white border-r-white/40"></div>
+          {/* Inner pulsing dot */}
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div className="h-3 w-3 animate-pulse rounded-full bg-white/80"></div>
+          </div>
+        </div>
+
+        {/* Text */}
         <div className="text-center">
-          <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-white mx-auto"></div>
-          <p className="mt-4 text-white text-lg">Loading book...</p>
+          <p className="text-white text-lg font-semibold tracking-wide">
+            Loading book
+          </p>
+          {/* Animated dots */}
+          <div className="flex justify-center gap-1 mt-2">
+            <span className="h-1.5 w-1.5 rounded-full bg-white/60 animate-bounce [animation-delay:0ms]"></span>
+            <span className="h-1.5 w-1.5 rounded-full bg-white/60 animate-bounce [animation-delay:150ms]"></span>
+            <span className="h-1.5 w-1.5 rounded-full bg-white/60 animate-bounce [animation-delay:300ms]"></span>
+          </div>
         </div>
       </div>
-    );
-  }
+    </div>
+  );
+}
+
 
   const leftPageIndex = currentPageIndex;
   const rightPageIndex = currentPageIndex + 1;
