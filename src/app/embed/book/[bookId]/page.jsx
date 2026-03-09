@@ -158,6 +158,56 @@ useEffect(() => {
 }, []); // ← Sirf ek baar run hoga on mount
 
 
+  // ── postMessage listener: external iframe parent se user data receive karo ──
+  // External site sends: { username, email, guestUserId, name }
+  useEffect(() => {
+    const handleMessage = async (event) => {
+      const data = event.data;
+
+      // Validate: sirf wahi messages accept karo jo user data carry karte hain
+      if (!data || typeof data !== 'object') return;
+      if (!data.username && !data.email) return;
+
+      console.log('📨 postMessage received:', data);
+
+      const { username, email, guestUserId, name } = data;
+
+      try {
+        const res = await fetch('/api/auth/set-token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, email, guestUserId, name }),
+          credentials: 'include',
+        });
+
+        const result = await res.json();
+        console.log('✅ postMessage auth response:', result);
+
+        if (result.success) {
+          // Token aur user data localStorage mein save karo
+          localStorage.setItem('bookTokenData', JSON.stringify({
+            user: result.user,
+            token: result.token,
+            storedAt: new Date().toISOString(),
+          }));
+          setToken(result.token);
+          // Highlights aur bookmarks reload karo ab ke user logged in hai
+          fetchHighlights?.();
+          fetchBookmarks?.();
+
+          // Parent window ko bata do ke auth ho gayi
+          event.source?.postMessage({ type: 'AUTH_SUCCESS', user: result.user }, event.origin);
+        } else {
+          console.error('❌ postMessage auth failed:', result.error);
+        }
+      } catch (err) {
+        console.error('❌ postMessage auth error:', err);
+      }
+    };
+
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, []); // ← Runs once, listener persists for the lifetime of the component
 
 
   // Update CSS custom property for font scaling

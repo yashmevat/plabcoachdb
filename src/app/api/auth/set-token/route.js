@@ -9,10 +9,71 @@ const JWT_SECRET = process.env.JWT_SECRET || 'my-3001-jwt-secret';
 
 export async function POST(request) {
   try {
-    const { token } = await request.json();
+    const body = await request.json();
+
+    // ── FLOW 2: Direct postMessage data (username, email, guestUserId, name) ──
+    // External iframe parent sends raw user data — no JWT needed
+    if (!body.token && (body.username || body.email)) {
+      const { username, email, guestUserId, name } = body;
+
+      if (!username || !email) {
+        return NextResponse.json({ success: false, error: 'username and email are required' }, { status: 400 });
+      }
+
+      const external_user_id = guestUserId || username;
+      const displayName = name || username;
+
+      // Find or create user
+      const [existing] = await pool.query('SELECT * FROM users WHERE email = ?', [email]);
+      let user;
+
+      if (existing.length > 0) {
+        user = existing[0];
+        // Keep external_user_id and name in sync
+        await pool.query(
+          'UPDATE users SET external_user_id = ?, username = ? WHERE id = ?',
+          [external_user_id, displayName, user.id]
+        );
+        user.username = displayName;
+        user.external_user_id = external_user_id;
+      } else {
+        const [result] = await pool.query(
+          `INSERT INTO users (username, email, password, role_id, external_user_id)
+           VALUES (?, ?, 'EXTERNAL_USER', 3, ?)`,
+          [displayName, email, external_user_id]
+        );
+        const [newUser] = await pool.query('SELECT * FROM users WHERE id = ?', [result.insertId]);
+        user = newUser[0];
+      }
+
+      const newToken = generateToken(user);
+      const response = NextResponse.json({
+        success: true,
+        user: {
+          id: user.id,
+          username: user.username,
+          email: user.email,
+          role_id: user.role_id,
+          external_user_id: user.external_user_id,
+        },
+        token: newToken,
+      });
+      response.cookies.set('token', newToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'none',   // required for cross-site iframe cookies
+        maxAge: 60 * 60 * 24 * 7,
+        path: '/',
+      });
+      console.log('✅ Direct postMessage auth success for:', email);
+      return response;
+    }
+
+    // ── FLOW 1: Existing JWT bridge-token flow ──
+    const { token } = body;
 
     if (!token) {
-      return NextResponse.json({ success: false, error: 'Token missing' }, { status: 400 });
+      return NextResponse.json({ success: false, error: 'Token or user data missing' }, { status: 400 });
     }
 
     // 3001 ka JWT verify karo - try multiple secrets
@@ -117,7 +178,7 @@ export async function POST(request) {
     response.cookies.set('token', newToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
+      sameSite: 'none',   // required for cross-site iframe cookies
       maxAge: 60 * 60 * 24 * 7,
       path: '/',
     });
