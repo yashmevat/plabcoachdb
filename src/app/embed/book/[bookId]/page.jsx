@@ -66,6 +66,15 @@ export default function BookReaderPage() {
   const FONT_STEP = 5;
 
   const [token,setToken] = useState(null);
+  // tokenRef — always holds the latest token in memory.
+  // Used by all fetch functions so they work even when localStorage is
+  // blocked (incognito / third-party storage restrictions).
+  const tokenRef = useRef(null);
+  const setAuthToken = (t) => { tokenRef.current = t; setToken(t); };
+
+  // Safe localStorage helpers — silently no-op when storage is blocked
+  const safeSetLS = (key, value) => { try { localStorage.setItem(key, value); } catch(e) {} };
+  const safeGetLS = (key) => { try { return localStorage.getItem(key); } catch(e) { return null; } };
 
   // Compute slider fill percent for UI and update CSS custom property for font scaling
   const sliderFill = Math.round(((fontSize - FONT_MIN) / (FONT_MAX - FONT_MIN)) * 100);
@@ -138,13 +147,14 @@ useEffect(() => {
   
 
       if (data.success) {
-          localStorage.setItem('bookTokenData', JSON.stringify({
+          setAuthToken(data.token);
+          safeSetLS('bookTokenData', JSON.stringify({
           user: data.user,
           token: data.token,
           storedAt: new Date().toISOString(),
   }));
 
-  console.log('✅ bookTokenData saved to localStorage');
+  console.log('✅ bookTokenData saved (memory + localStorage)');
   
   fetchHighlights();
   fetchBookmarks();
@@ -184,15 +194,15 @@ useEffect(() => {
         console.log('✅ postMessage auth response:', result);
 
         if (result.success) {
-          // Token aur user data localStorage mein save karo
-          localStorage.setItem('bookTokenData', JSON.stringify({
+          // Token save karo — memory mein (always works) + localStorage (best-effort)
+          setAuthToken(result.token);
+          safeSetLS('bookTokenData', JSON.stringify({
             user: result.user,
             token: result.token,
             storedAt: new Date().toISOString(),
           }));
-          setToken(result.token);
           // AuthContext ko trigger karo checkAuth re-run karne ke liye
-          window.dispatchEvent(new Event('auth-updated'));
+          window.dispatchEvent(new CustomEvent('auth-updated', { detail: { token: result.token } }));
           // Highlights aur bookmarks reload karo ab ke user logged in hai
           fetchHighlights?.();
           fetchBookmarks?.();
@@ -365,10 +375,9 @@ useEffect(() => {
       fetchAllData();
       // Only fetch highlights/bookmarks on mount if we already have a saved token
       // (returning user). Otherwise skip — postMessage handler will call them after auth.
-      const saved = typeof window !== 'undefined'
-        ? JSON.parse(localStorage.getItem('bookTokenData') || '{}')
-        : {};
+      const saved = JSON.parse(safeGetLS('bookTokenData') || '{}');
       if (saved?.token) {
+        tokenRef.current = saved.token; // restore token from storage into ref
         fetchHighlights();
         fetchBookmarks();
       }
@@ -418,13 +427,11 @@ useEffect(() => {
 
 const fetchHighlights = async () => {
   try {
-    // ✅ localStorage se token lo
-    const bookData = JSON.parse(localStorage.getItem('bookTokenData') || '{}');
-    const token = bookData?.token;
+    const token = tokenRef.current;
 
     const response = await fetch(`${API_BASE}/api/books/${bookId}/highlights`, {
       headers: {
-        ...(token ? { 'x-book-token': token } : {}), // ← token header mein
+        ...(token ? { 'x-book-token': token } : {}),
       },
       credentials: 'include', // cookie bhi saath jaayegi
     });
@@ -482,9 +489,7 @@ const saveHighlight = async () => {
   }
 
   try {
-    // ✅ localStorage se token lo
-    const bookData = JSON.parse(localStorage.getItem('bookTokenData') || '{}');
-    const token = bookData?.token;
+    const token = tokenRef.current;
 
     const response = await fetch(`${API_BASE}/api/books/${bookId}/highlights`, {
       method: 'POST',
@@ -532,9 +537,7 @@ const saveHighlight = async () => {
   }
 
   try {
-    // ✅ localStorage se token lo
-    const bookData = JSON.parse(localStorage.getItem('bookTokenData') || '{}');
-    const token = bookData?.token;
+    const token = tokenRef.current;
 
     const response = await fetch(`${API_BASE}/api/books/${bookId}/highlights?id=${highlightId}`, {
       method: 'DELETE',
@@ -629,9 +632,7 @@ const saveHighlight = async () => {
   // Bookmark Functions
 const fetchBookmarks = async () => {
   try {
-    // ✅ localStorage se token lo
-    const bookData = JSON.parse(localStorage.getItem('bookTokenData') || '{}');
-    const token = bookData?.token;
+    const token = tokenRef.current;
 
     const response = await fetch(`${API_BASE}/api/books/${bookId}/bookmarks`, {
       headers: {
@@ -665,9 +666,7 @@ const fetchBookmarks = async () => {
 
   const toggleBookmark = async (pageIndex) => {
   try {
-    // ✅ localStorage se token lo
-    const bookData = JSON.parse(localStorage.getItem('bookTokenData') || '{}');
-    const token = bookData?.token;
+    const token = tokenRef.current;
 
     const response = await fetch(`${API_BASE}/api/books/${bookId}/bookmarks`, {
       method: 'POST',
@@ -709,9 +708,7 @@ const fetchBookmarks = async () => {
   }
 
   try {
-    // ✅ localStorage se token lo
-    const bookData = JSON.parse(localStorage.getItem('bookTokenData') || '{}');
-    const token = bookData?.token;
+    const token = tokenRef.current;
 
     const response = await fetch(`${API_BASE}/api/books/${bookId}/bookmarks?id=${bookmarkId}`, {
       method: 'DELETE',

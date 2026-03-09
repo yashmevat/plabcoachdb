@@ -10,14 +10,14 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
   const router = useRouter();
 
-  const checkAuth = useCallback(async () => {
+  const checkAuth = useCallback(async (inMemoryToken) => {
     try {
-      // Include x-book-token from localStorage for iframe embed contexts
-      const saved = typeof window !== 'undefined'
-        ? JSON.parse(localStorage.getItem('bookTokenData') || '{}')
-        : {};
+      // Include x-book-token: prefer in-memory token (incognito safe), fallback to localStorage
+      let saved = {};
+      try { saved = JSON.parse(localStorage.getItem('bookTokenData') || '{}'); } catch(e) {}
       const headers = {};
-      if (saved?.token) headers['x-book-token'] = saved.token;
+      const tokenToUse = inMemoryToken || saved?.token;
+      if (tokenToUse) headers['x-book-token'] = tokenToUse;
 
       const res = await fetch('/api/auth/me', {
         credentials: 'include',
@@ -47,9 +47,8 @@ export function AuthProvider({ children }) {
     // to avoid a guaranteed 401. Auth will be triggered by the 'auth-updated' event
     // once the postMessage flow completes.
     const isIframe = typeof window !== 'undefined' && window.self !== window.top;
-    const saved = typeof window !== 'undefined'
-      ? JSON.parse(localStorage.getItem('bookTokenData') || '{}')
-      : {};
+    let saved = {};
+    try { saved = JSON.parse(localStorage.getItem('bookTokenData') || '{}'); } catch(e) {}
 
     if (isIframe && !saved?.token) {
       setLoading(false);
@@ -61,7 +60,11 @@ export function AuthProvider({ children }) {
 
   // Listen for postMessage auth completion so AuthContext re-checks with the new token
   useEffect(() => {
-    const handleAuthUpdated = () => checkAuth();
+    const handleAuthUpdated = (e) => {
+      // e.detail.token is set when localStorage is blocked (incognito)
+      const inMemoryToken = e?.detail?.token;
+      checkAuth(inMemoryToken);
+    };
     window.addEventListener('auth-updated', handleAuthUpdated);
     return () => window.removeEventListener('auth-updated', handleAuthUpdated);
   }, [checkAuth]);
