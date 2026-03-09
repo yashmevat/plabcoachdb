@@ -12,9 +12,17 @@ export function AuthProvider({ children }) {
 
   const checkAuth = useCallback(async () => {
     try {
+      // Include x-book-token from localStorage for iframe embed contexts
+      const saved = typeof window !== 'undefined'
+        ? JSON.parse(localStorage.getItem('bookTokenData') || '{}')
+        : {};
+      const headers = {};
+      if (saved?.token) headers['x-book-token'] = saved.token;
+
       const res = await fetch('/api/auth/me', {
         credentials: 'include',
         cache: 'no-store',
+        headers,
       });
       const data = await res.json();
       
