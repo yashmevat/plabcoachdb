@@ -208,6 +208,14 @@ useEffect(() => {
     };
 
     window.addEventListener('message', handleMessage);
+
+    // ── Tell the parent window that this iframe is ready to receive messages ──
+    // This fires AFTER the listener is registered, so no message is ever missed.
+    // Parent should send user data on 'IFRAME_READY' event instead of on iframe 'load'.
+    try {
+      window.parent.postMessage({ type: 'IFRAME_READY' }, '*');
+    } catch (e) {}
+
     return () => window.removeEventListener('message', handleMessage);
   }, []); // ← Runs once, listener persists for the lifetime of the component
 
