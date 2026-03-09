@@ -124,54 +124,92 @@ export default function BookReaderPage() {
 // Component ke andar, baaki states ke saath
 const searchParams = useSearchParams();
 
-// Existing useEffects ke saath yeh add karo
+// ── PRIMARY AUTH: URL query params se user data lo ──
+// Parent iframe src mein params inject kare:
+// ?username=xxx&email=xxx@test.com&guestUserId=xxx&name=xxx
+// Ya legacy JWT: ?token=xxx
+// URL params are ALWAYS available — no cookie/localStorage/timing issues.
 useEffect(() => {
-  const token = searchParams.get('token');
-  if (!token) return;
-  setToken(token);
+  const urlToken    = searchParams.get('token');
+  const urlUsername = searchParams.get('username');
+  const urlEmail    = searchParams.get('email');
+  const urlGuestId  = searchParams.get('guestUserId');
+  const urlName     = searchParams.get('name');
 
-  console.log('Token found in URL:', token); // ← CHECK
-
-  const authenticate = async () => {
-    try {
-      const res = await fetch('/api/auth/set-token', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token }),
-        credentials: 'include',
-      });
-
-      const data = await res.json();
-      console.log('Set token response:', data); // ← CHECK
-
-  
-
-      if (data.success) {
+  // Case 1: direct user params in URL
+  if (urlUsername || urlEmail) {
+    const doAuth = async () => {
+      try {
+        const res = await fetch('/api/auth/set-token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            username: urlUsername,
+            email: urlEmail,
+            guestUserId: urlGuestId,
+            name: urlName,
+          }),
+        });
+        const data = await res.json();
+        console.log('✅ URL-param auth response:', data);
+        if (data.success) {
           setAuthToken(data.token);
           safeSetLS('bookTokenData', JSON.stringify({
-          user: data.user,
-          token: data.token,
-          storedAt: new Date().toISOString(),
-  }));
-
-  console.log('✅ bookTokenData saved (memory + localStorage)');
-  
-  fetchHighlights();
-  fetchBookmarks();
+            user: data.user,
+            token: data.token,
+            storedAt: new Date().toISOString(),
+          }));
+          window.dispatchEvent(new CustomEvent('auth-updated', { detail: { token: data.token } }));
+          fetchHighlights();
+          fetchBookmarks();
+        }
+      } catch (err) {
+        console.error('URL-param auth error:', err);
       }
-    } catch (err) {
-      console.error('Auth error:', err);
-    }
-  };
+    };
+    doAuth();
+    return; // don't run legacy JWT flow
+  }
 
-  authenticate();
-}, []); // ← Sirf ek baar run hoga on mount
+  // Case 2: legacy JWT token in URL
+  if (urlToken) {
+    setAuthToken(urlToken);
+    const doAuth = async () => {
+      try {
+        const res = await fetch('/api/auth/set-token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: urlToken }),
+          credentials: 'include',
+        });
+        const data = await res.json();
+        console.log('Set token response:', data);
+        if (data.success) {
+          setAuthToken(data.token);
+          safeSetLS('bookTokenData', JSON.stringify({
+            user: data.user,
+            token: data.token,
+            storedAt: new Date().toISOString(),
+          }));
+          console.log('✅ bookTokenData saved (memory + localStorage)');
+          fetchHighlights();
+          fetchBookmarks();
+        }
+      } catch (err) {
+        console.error('Auth error:', err);
+      }
+    };
+    doAuth();
+  }
+}, []); // ← runs once on mount — URL params don't change
 
 
-  // ── postMessage listener: external iframe parent se user data receive karo ──
-  // External site sends: { username, email, guestUserId, name }
+  // ── SECONDARY AUTH: postMessage fallback ──
+  // Used when parent can't inject URL params (e.g. dynamic iframe src is hard to change)
   useEffect(() => {
-    let authDone = false; // flag: stop retrying once auth succeeds
+    // If URL params are present, URL-param auth handles everything — skip postMessage flow
+    const hasUrlAuth = !!(searchParams.get('username') || searchParams.get('email') || searchParams.get('token'));
+    let authDone = hasUrlAuth;
     let readyInterval = null;
 
     const handleMessage = async (event) => {
