@@ -1438,11 +1438,12 @@ const fetchBookmarks = async () => {
       max-width: 70%;
     }
   }
+    
       @media (min-width: 1024px) and (max-width: 1450px) {
     .book-spread-container {
       transform: scale(1);
       transform-origin: center top;
-      max-width: 70%;
+      max-width: 80%;
     }
   }
   
