@@ -352,9 +352,16 @@ useEffect(() => {
 
   useEffect(() => {
     if (bookId) {
-        fetchAllData();
-      fetchHighlights();
-      fetchBookmarks();
+      fetchAllData();
+      // Only fetch highlights/bookmarks on mount if we already have a saved token
+      // (returning user). Otherwise skip — postMessage handler will call them after auth.
+      const saved = typeof window !== 'undefined'
+        ? JSON.parse(localStorage.getItem('bookTokenData') || '{}')
+        : {};
+      if (saved?.token) {
+        fetchHighlights();
+        fetchBookmarks();
+      }
     }
   }, [bookId]);
 
