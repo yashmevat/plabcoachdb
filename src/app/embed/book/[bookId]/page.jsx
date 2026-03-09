@@ -171,12 +171,18 @@ useEffect(() => {
   // ── postMessage listener: external iframe parent se user data receive karo ──
   // External site sends: { username, email, guestUserId, name }
   useEffect(() => {
+    let authDone = false; // flag: stop retrying once auth succeeds
+    let readyInterval = null;
+
     const handleMessage = async (event) => {
       const data = event.data;
 
       // Validate: sirf wahi messages accept karo jo user data carry karte hain
       if (!data || typeof data !== 'object') return;
       if (!data.username && !data.email) return;
+
+      // Already authed — ignore duplicate messages
+      if (authDone) return;
 
       console.log('📨 postMessage received:', data);
 
@@ -194,6 +200,9 @@ useEffect(() => {
         console.log('✅ postMessage auth response:', result);
 
         if (result.success) {
+          authDone = true; // ← stop retrying
+          clearInterval(readyInterval);
+
           // Token save karo — memory mein (always works) + localStorage (best-effort)
           setAuthToken(result.token);
           safeSetLS('bookTokenData', JSON.stringify({
@@ -219,14 +228,31 @@ useEffect(() => {
 
     window.addEventListener('message', handleMessage);
 
-    // ── Tell the parent window that this iframe is ready to receive messages ──
-    // This fires AFTER the listener is registered, so no message is ever missed.
-    // Parent should send user data on 'IFRAME_READY' event instead of on iframe 'load'.
-    try {
-      window.parent.postMessage({ type: 'IFRAME_READY' }, '*');
-    } catch (e) {}
+    // ── Keep pinging parent with IFRAME_READY until auth succeeds ──
+    // Single send is not enough — in SPA navigations the parent's message
+    // listener may not be registered yet when the first ping fires.
+    // We retry every 300ms for up to 10 seconds, then give up.
+    const sendReady = () => {
+      if (authDone) return;
+      try { window.parent.postMessage({ type: 'IFRAME_READY' }, '*'); } catch (e) {}
+    };
 
-    return () => window.removeEventListener('message', handleMessage);
+    sendReady(); // immediate first attempt
+    let attempts = 0;
+    const MAX_ATTEMPTS = 33; // 33 × 300ms ≈ 10 seconds
+    readyInterval = setInterval(() => {
+      if (authDone || attempts >= MAX_ATTEMPTS) {
+        clearInterval(readyInterval);
+        return;
+      }
+      attempts++;
+      sendReady();
+    }, 300);
+
+    return () => {
+      window.removeEventListener('message', handleMessage);
+      clearInterval(readyInterval);
+    };
   }, []); // ← Runs once, listener persists for the lifetime of the component
 
 
