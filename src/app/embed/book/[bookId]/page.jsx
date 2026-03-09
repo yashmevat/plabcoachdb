@@ -1337,15 +1337,7 @@ if (loading) {
   return (
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-[#0f172a] via-[#1e1b4b] to-[#0f172a]">
       <div className="flex flex-col items-center gap-6">
-        {/* Outer ring */}
-        <div className="relative h-20 w-20">
-          <div className="absolute inset-0 rounded-full border-4 border-white/10"></div>
-          <div className="absolute inset-0 animate-spin rounded-full border-4 border-transparent border-t-white border-r-white/40"></div>
-          {/* Inner pulsing dot */}
-          <div className="absolute inset-0 flex items-center justify-center">
-            <div className="h-3 w-3 animate-pulse rounded-full bg-white/80"></div>
-          </div>
-        </div>
+
 
         {/* Text */}
         <div className="text-center">
@@ -1985,7 +1977,7 @@ if (loading) {
 
 
 
-  <div className={`min-h-screen transition-colors duration-300 ${isDarkMode ? 'bg-[#1A1A1A]' : 'bg-[#F4F1EA]'}`}>
+  <div className={`min-h-screen transition-colors duration-300 ${isDarkMode ? 'bg-[#1A1A1A]' : 'bg-[#F0F4F8]'}`}>
 
         {/* Previous Button - Fixed Left Side */}
         {canGoPrevious() && bookOpened && !isMobile && (
