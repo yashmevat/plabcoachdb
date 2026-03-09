@@ -43,7 +43,27 @@ export function AuthProvider({ children }) {
   }, []);
 
   useEffect(() => {
+    // In a cross-origin iframe with no saved token, skip the initial API call
+    // to avoid a guaranteed 401. Auth will be triggered by the 'auth-updated' event
+    // once the postMessage flow completes.
+    const isIframe = typeof window !== 'undefined' && window.self !== window.top;
+    const saved = typeof window !== 'undefined'
+      ? JSON.parse(localStorage.getItem('bookTokenData') || '{}')
+      : {};
+
+    if (isIframe && !saved?.token) {
+      setLoading(false);
+      return;
+    }
+
     checkAuth();
+  }, [checkAuth]);
+
+  // Listen for postMessage auth completion so AuthContext re-checks with the new token
+  useEffect(() => {
+    const handleAuthUpdated = () => checkAuth();
+    window.addEventListener('auth-updated', handleAuthUpdated);
+    return () => window.removeEventListener('auth-updated', handleAuthUpdated);
   }, [checkAuth]);
 
   const login = useCallback(async (credentials) => {

@@ -191,6 +191,8 @@ useEffect(() => {
             storedAt: new Date().toISOString(),
           }));
           setToken(result.token);
+          // AuthContext ko trigger karo checkAuth re-run karne ke liye
+          window.dispatchEvent(new Event('auth-updated'));
           // Highlights aur bookmarks reload karo ab ke user logged in hai
           fetchHighlights?.();
           fetchBookmarks?.();
