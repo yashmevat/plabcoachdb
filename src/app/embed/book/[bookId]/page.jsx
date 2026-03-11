@@ -664,13 +664,6 @@ const saveHighlight = async () => {
             return p;
           });
           setAllPages(updated);
-          setTimeout(() => {
-            try {
-              applyHighlightsToPage();
-            } catch (e) {
-              console.warn('reapply after delete failed', e);
-            }
-          }, 50);
         }
       } catch (err) {
         console.warn('immediate highlight remove error', err);
@@ -685,7 +678,7 @@ const saveHighlight = async () => {
 };
 
 
-  const goToHighlight = (pageIndex) => {
+  const goToHighlight = (pageIndex, highlightId) => {
     if (isSinglePageMode()) {
       // Single page mode (mobile or desktop single view): direct navigation
       setCurrentPageIndex(pageIndex);
@@ -696,6 +689,23 @@ const saveHighlight = async () => {
       } else {
         setCurrentPageIndex(pageIndex);
       }
+    }
+
+    // After page navigation + highlight re-application, scroll the specific mark into view
+    if (highlightId) {
+      setTimeout(() => {
+        const mark = document.querySelector(`mark[data-highlight-id="${highlightId}"]`);
+        if (mark) {
+          mark.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          // Brief pulse outline so the user sees exactly which text was highlighted
+          mark.style.outline = '3px solid #3b82f6';
+          mark.style.outlineOffset = '2px';
+          setTimeout(() => {
+            mark.style.outline = '';
+            mark.style.outlineOffset = '';
+          }, 1500);
+        }
+      }, 700); // 700ms: enough for React re-render + applyHighlightsToPage (500ms delay)
     }
   };
 
@@ -844,25 +854,14 @@ const fetchBookmarks = async () => {
       }, 500); // wait 500ms of stability
     };
 
-    const handleClick = () => {
-      // Re-apply highlights after any click to prevent them from disappearing
-      setTimeout(() => {
-        if (highlights.length > 0 && bookOpened) {
-          applyHighlightsToPage();
-        }
-      }, 50);
-    };
-
     document.addEventListener('mouseup', handleMouseUp);
     document.addEventListener('touchend', handleTouchEnd, { passive: true });
     document.addEventListener('selectionchange', handleSelectionChange);
-    document.addEventListener('click', handleClick);
 
     return () => {
       document.removeEventListener('mouseup', handleMouseUp);
       document.removeEventListener('touchend', handleTouchEnd);
       document.removeEventListener('selectionchange', handleSelectionChange);
-      document.removeEventListener('click', handleClick);
       if (selectionTimerRef.current) {
         clearTimeout(selectionTimerRef.current);
         selectionTimerRef.current = null;
@@ -900,7 +899,10 @@ const fetchBookmarks = async () => {
     });
 
     currentPageHighlights.forEach(highlight => {
-      const contentElements = document.querySelectorAll('.book-content-text');
+      // Apply to all visible content elements (both left and right pages).
+      // ContentPage already handles this inline via React rendering; this function
+      // is a safety net for cases where DOM marks need re-application.
+      const contentElements = document.querySelectorAll('.book-spread .book-content-text');
       contentElements.forEach(element => {
         // Check if highlight already exists
         const existingMark = element.querySelector(`mark[data-highlight-id="${highlight.id}"]`);
@@ -2236,7 +2238,7 @@ if (loading) {
                         isDarkMode={isDarkMode}
                         setIsDarkMode={setIsDarkMode}
                         isMobile={isMobile}
-                        currentPageIndex={currentPageIndex}
+                        currentPageIndex={nextLeftPageIndex}
                       />
                     </div>
                     {!isSinglePageMode() && (
@@ -2252,7 +2254,7 @@ if (loading) {
                             isDarkMode={isDarkMode}
                             setIsDarkMode={setIsDarkMode}
                             isMobile={isMobile}
-                            currentPageIndex={currentPageIndex}
+                            currentPageIndex={nextLeftPageIndex}
                           />
                         ) : (
                           <div style={{width: '100%', height: '100%'}} />
@@ -2276,7 +2278,7 @@ if (loading) {
                         isDarkMode={isDarkMode}
                         setIsDarkMode={setIsDarkMode}
                         isMobile={isMobile}
-                        currentPageIndex={currentPageIndex}
+                        currentPageIndex={prevLeftPageIndex}
                       />
                     </div>
                     {!isSinglePageMode() && (
@@ -2293,7 +2295,7 @@ if (loading) {
                               isDarkMode={isDarkMode}
                               setIsDarkMode={setIsDarkMode}
                               isMobile={isMobile}
-                              currentPageIndex={currentPageIndex}
+                              currentPageIndex={prevLeftPageIndex}
                             />
                           ) : (
                             <div style={{width: '100%', height: '100%'}} />
@@ -2388,7 +2390,7 @@ if (loading) {
                           isDarkMode ? 'bg-gray-800 hover:bg-gray-750' : 'bg-white hover:bg-gray-50'
                         }`}
                         style={{ borderTop: `2px solid ${highlight.color}` }}
-                        onClick={() => goToHighlight(highlight.page_index)}
+                        onClick={() => goToHighlight(highlight.page_index, highlight.id)}
                       >
                         <div className="flex items-start gap-2 mb-1">
                           <div className="w-2 h-2 rounded-full mt-1" style={{ backgroundColor: highlight.color }}></div>
@@ -3015,7 +3017,7 @@ function SubtopicTitlePage({ subtopic, topicTitle, pageNumber, isDarkMode }) {
 }
 
 
-function ContentPage({ page, pageIndex, highlights, chapterTitle, pageNumber, isDarkMode }) {
+function ContentPage({ page, pageIndex, highlights, chapterTitle, pageNumber, isDarkMode, isMobile, currentPageIndex }) {
   // Header and footer heights
   const HEADER_HEIGHT = 60;
   const FOOTER_HEIGHT = 50;
@@ -3029,9 +3031,28 @@ function ContentPage({ page, pageIndex, highlights, chapterTitle, pageNumber, is
   // Trim trailing empty <p><br></p>
   htmlContent = htmlContent.replace(/(\s*<p[^>]*>\s*(<br\s*\/?>)?\s*<\/p>\s*)+$/gi, '');
 
+  // Always strip any previously-injected <mark> tags from the base HTML.
+  // This ensures stale marks from injectHighlightsIntoAllPages (baked into
+  // allPages state) are never rendered on pages we navigate to after a delete.
+  try {
+    const stripContainer = document.createElement('div');
+    stripContainer.innerHTML = htmlContent;
+    stripContainer.querySelectorAll('mark[data-highlight-id]').forEach(m => {
+      const frag = document.createDocumentFragment();
+      while (m.firstChild) frag.appendChild(m.firstChild);
+      m.replaceWith(frag);
+    });
+    htmlContent = stripContainer.innerHTML;
+  } catch (e) {}
+
   try {
     if (highlights && highlights.length > 0 && typeof pageIndex === 'number') {
-      const pageHighlights = highlights.filter(h => h.page_index === pageIndex);
+      // Show highlights from BOTH pages of the current spread so that
+      // a word present on both left and right page gets marked on both.
+      const spreadIndices = (!isMobile && typeof currentPageIndex === 'number')
+        ? [currentPageIndex, currentPageIndex + 1]
+        : (typeof currentPageIndex === 'number' ? [currentPageIndex] : [pageIndex]);
+      const pageHighlights = highlights.filter(h => spreadIndices.includes(h.page_index));
       if (pageHighlights.length > 0) {
         try {
           const container = document.createElement('div');
@@ -3039,7 +3060,6 @@ function ContentPage({ page, pageIndex, highlights, chapterTitle, pageNumber, is
 
           pageHighlights.forEach(highlight => {
             try {
-              if (container.querySelector(`mark[data-highlight-id="${highlight.id}"]`)) return;
               const instance = new Mark(container);
               instance.mark(highlight.selected_text || '', {
                 separateWordSearch: false,
