@@ -10,6 +10,7 @@ export function useCloneManagement(bookManagement) {
     topics, 
     setTopics, 
     setLoading, 
+    savingTopics,
     saveFormState,
     fetchBooks 
   } = bookManagement;
@@ -252,7 +253,64 @@ export function useCloneManagement(bookManagement) {
     setTopicTitles({});
   };
 
-  // Similar handlers for subtopic cloning...
+  const ensureTopicSavedForCloning = async (topicIndex) => {
+    const topic = topics[topicIndex];
+
+    if (!topic || !topic.name?.trim()) {
+      alert('Please enter topic name first');
+      return null;
+    }
+
+    if (topic.topicId) {
+      return topic.topicId;
+    }
+
+    const saveKey = `topic-${topicIndex}`;
+
+    if (savingTopics.current.has(saveKey)) {
+      const startTime = Date.now();
+      while (savingTopics.current.has(saveKey) && Date.now() - startTime < 15000) {
+        await new Promise(resolve => setTimeout(resolve, 200));
+      }
+
+      return topics[topicIndex]?.topicId || null;
+    }
+
+    savingTopics.current.add(saveKey);
+    try {
+      const res = await fetch('/api/author/topics', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: topic.name,
+          book_id: currentBookId
+        })
+      });
+
+      const data = await res.json();
+      if (!data.success) {
+        alert('Error: ' + data.error);
+        return null;
+      }
+
+      const newTopics = [...topics];
+      newTopics[topicIndex] = {
+        ...newTopics[topicIndex],
+        topicId: data.topicId
+      };
+      setTopics(newTopics);
+      saveFormState(bookTitle, currentBookId, newTopics);
+
+      return data.topicId;
+    } catch (error) {
+      console.error('Error saving topic before clone:', error);
+      alert('Failed to save topic before cloning subtopics');
+      return null;
+    } finally {
+      savingTopics.current.delete(saveKey);
+    }
+  };
+
   const handleOpenCloneSubtopicModal = async (topicIndex) => {
     if (!bookTitle.trim()) {
       alert('Please enter a book title first');
@@ -282,9 +340,8 @@ export function useCloneManagement(bookManagement) {
       setLoading(false);
     }
     
-    const topic = topics[topicIndex];
-    if (!topic.topicId) {
-      alert('Please save the topic first');
+    const savedTopicId = await ensureTopicSavedForCloning(topicIndex);
+    if (!savedTopicId) {
       return;
     }
     
@@ -302,6 +359,218 @@ export function useCloneManagement(bookManagement) {
     } catch (error) {
       console.error('Error loading books:', error);
       alert('Failed to load books');
+    }
+    setLoading(false);
+  };
+
+  const handleSourceBookChangeForSubtopic = async (bookId) => {
+    setSelectedSourceBookForSubtopic(bookId);
+    setSelectedSourceTopic('');
+    setAvailableTopicsForSubtopic([]);
+    setAvailableSubtopics([]);
+    setSelectedSubtopics([]);
+    setSubtopicTitles({});
+
+    if (!bookId) {
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/superadmin/topics?bookId=${bookId}`);
+      const data = await res.json();
+      if (data.success) {
+        setAvailableTopicsForSubtopic(data.data || []);
+      } else {
+        alert('Failed to load topics');
+      }
+    } catch (error) {
+      console.error('Error loading source topics for subtopic clone:', error);
+      alert('Failed to load topics');
+    }
+    setLoading(false);
+  };
+
+  const handleSourceTopicChange = async (topicId) => {
+    setSelectedSourceTopic(topicId);
+    setAvailableSubtopics([]);
+    setSelectedSubtopics([]);
+    setSubtopicTitles({});
+
+    if (!topicId) {
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/superadmin/subtopics?topicId=${topicId}`);
+      const data = await res.json();
+      if (data.success) {
+        setAvailableSubtopics(data.data || []);
+      } else {
+        alert('Failed to load subtopics');
+      }
+    } catch (error) {
+      console.error('Error loading source subtopics:', error);
+      alert('Failed to load subtopics');
+    }
+    setLoading(false);
+  };
+
+  const handleSubtopicSelection = (subtopicId) => {
+    setSelectedSubtopics(prev => {
+      if (prev.includes(subtopicId)) {
+        const newSelected = prev.filter(id => id !== subtopicId);
+        const newTitles = { ...subtopicTitles };
+        delete newTitles[subtopicId];
+        setSubtopicTitles(newTitles);
+        return newSelected;
+      }
+
+      const subtopic = availableSubtopics.find(s => s.id === subtopicId);
+      if (subtopic) {
+        setSubtopicTitles(prevTitles => ({
+          ...prevTitles,
+          [subtopicId]: subtopic.name
+        }));
+      }
+
+      return [...prev, subtopicId];
+    });
+  };
+
+  const handleSelectAllSubtopics = () => {
+    if (selectedSubtopics.length === availableSubtopics.length) {
+      setSelectedSubtopics([]);
+      setSubtopicTitles({});
+      return;
+    }
+
+    const allIds = availableSubtopics.map(s => s.id);
+    const titles = {};
+    availableSubtopics.forEach(s => {
+      titles[s.id] = s.name;
+    });
+
+    setSelectedSubtopics(allIds);
+    setSubtopicTitles(titles);
+  };
+
+  const handleCloneSubtopicsSave = async () => {
+    if (targetTopicIndex === null || targetTopicIndex === undefined) {
+      alert('Target topic is not selected');
+      return;
+    }
+
+    if (selectedSubtopics.length === 0) {
+      alert('Please select at least one subtopic to clone');
+      return;
+    }
+
+    const targetTopic = topics[targetTopicIndex];
+    if (!targetTopic || !targetTopic.topicId) {
+      alert('Target topic not found or not saved yet');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const clonedSubtopics = [];
+      let totalPagesCopied = 0;
+
+      for (const sourceSubtopicId of selectedSubtopics) {
+        const sourceSubtopic = availableSubtopics.find(s => s.id === sourceSubtopicId);
+        if (!sourceSubtopic) {
+          continue;
+        }
+
+        const newName = (subtopicTitles[sourceSubtopicId] || sourceSubtopic.name || '').trim();
+        if (!newName) {
+          alert('Subtopic title cannot be empty');
+          setLoading(false);
+          return;
+        }
+
+        const alreadyExists = (targetTopic.subtopics || []).some(s => {
+          const sameOriginal = s.originalSubtopicId && s.originalSubtopicId === sourceSubtopicId;
+          const sameName = (s.name || '').trim().toLowerCase() === newName.toLowerCase();
+          return sameOriginal || sameName;
+        });
+
+        if (alreadyExists) {
+          continue;
+        }
+
+        const createRes = await fetch('/api/author/subtopics', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: newName,
+            book_id: currentBookId,
+            topic_id: targetTopic.topicId,
+            clone_id: sourceSubtopic.clone_id || null
+          })
+        });
+
+        const createData = await createRes.json();
+        if (!createData.success) {
+          alert('Failed to clone subtopic: ' + createData.error);
+          setLoading(false);
+          return;
+        }
+
+        const newSubtopicId = createData.id;
+
+        const pagesRes = await fetch('/api/superadmin/clone-subtopic-pages', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            originalSubtopicId: sourceSubtopicId,
+            newSubtopicId,
+            newTopicId: targetTopic.topicId
+          })
+        });
+
+        const pagesData = await pagesRes.json();
+        if (!pagesData.success) {
+          alert('Subtopic was created, but copying pages failed: ' + pagesData.error);
+        } else {
+          totalPagesCopied += pagesData.pagesCopied || 0;
+        }
+
+        clonedSubtopics.push({
+          id: Date.now() + Math.random(),
+          name: newName,
+          subtopicId: newSubtopicId,
+          isCloned: true,
+          originalSubtopicId: sourceSubtopicId,
+          cloneId: sourceSubtopic.clone_id || null
+        });
+      }
+
+      if (clonedSubtopics.length === 0) {
+        alert('No new subtopics were cloned. They may already exist in this topic.');
+        setLoading(false);
+        return;
+      }
+
+      const newTopics = [...topics];
+      const existingSubtopics = newTopics[targetTopicIndex].subtopics || [];
+      newTopics[targetTopicIndex] = {
+        ...newTopics[targetTopicIndex],
+        hasSubtopics: true,
+        subtopics: [...existingSubtopics, ...clonedSubtopics]
+      };
+
+      setTopics(newTopics);
+      saveFormState(bookTitle, currentBookId, newTopics);
+      await fetchBooks();
+
+      handleCloseCloneSubtopicModal();
+      alert(`Subtopics cloned successfully! ${totalPagesCopied} page(s) copied.`);
+    } catch (error) {
+      console.error('Error cloning subtopics:', error);
+      alert('Failed to clone subtopics');
     }
     setLoading(false);
   };
@@ -344,6 +613,11 @@ export function useCloneManagement(bookManagement) {
     selectedSubtopics,
     subtopicTitles,
     setSubtopicTitles,
+    handleSourceBookChangeForSubtopic,
+    handleSourceTopicChange,
+    handleSubtopicSelection,
+    handleSelectAllSubtopics,
+    handleCloneSubtopicsSave,
     
     // Sync Modal
     showSyncModal,

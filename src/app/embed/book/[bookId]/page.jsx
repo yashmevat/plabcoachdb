@@ -3164,3 +3164,39 @@ function BackCoverPage({ book }) {
     </div>
   );
 }
+
+
+
+
+
+
+{/* <p><iframe id="plab-iframe" src="https://plabcoachdb.vercel.app/embed/book/222" style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; border: none; margin: 0; padding: 0; overflow: hidden; z-index: 9999;" allow="speech-synthesis; clipboard-read; clipboard-write" allowfullscreen="allowfullscreen">
+</iframe></p>
+<p>
+<script>
+(function() {
+  const username    = localStorage.getItem('username');
+  const guestUserId = localStorage.getItem('guest_user_id');
+  const name        = localStorage.getItem('name');
+  const email       = username ? username + '@testing.com' : null;
+
+  if (!username || !email) return; // user not logged in
+
+  const userData = { username, email, guestUserId, name };
+
+  // &#9472;&#9472; METHOD 1: Inject as URL params (fires on first byte, no timing issues) &#9472;&#9472;
+  const iframe = document.getElementById('plab-iframe');
+  const base   = 'https://plabcoachdb.vercel.app/embed/book/222';
+  const params = new URLSearchParams(userData).toString();
+  iframe.src   = base + '?' + params;
+
+  // &#9472;&#9472; METHOD 2: IFRAME_READY listener (fallback for postMessage flow) &#9472;&#9472;
+  window.addEventListener('message', function(event) {
+    if (event.origin !== 'https://plabcoachdb.vercel.app') return;
+    if (event.data?.type === 'IFRAME_READY') {
+      iframe.contentWindow.postMessage(userData, 'https://plabcoachdb.vercel.app');
+    }
+  });
+})();
+</script>
+</p> */}

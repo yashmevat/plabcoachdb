@@ -80,6 +80,18 @@ export default function AuthorBooksPage() {
     showCloneSubtopicModal,
     handleOpenCloneSubtopicModal,
     handleCloseCloneSubtopicModal,
+    selectedSourceBookForSubtopic,
+    availableTopicsForSubtopic,
+    selectedSourceTopic,
+    availableSubtopics,
+    selectedSubtopics,
+    subtopicTitles,
+    setSubtopicTitles,
+    handleSourceBookChangeForSubtopic,
+    handleSourceTopicChange,
+    handleSubtopicSelection,
+    handleSelectAllSubtopics,
+    handleCloneSubtopicsSave,
     showSyncModal,
     setShowSyncModal,
     isEditMode,
@@ -145,27 +157,30 @@ export default function AuthorBooksPage() {
         const clonedTopicsInfo = [];
         
         for (const topic of topics) {
-          if (topic.cloneId) {
+          const hasClonedSubtopics = (topic.subtopics || []).some(s => !!s.cloneId || !!s.originalSubtopicId);
+          if (topic.cloneId || hasClonedSubtopics) {
             clonedTopicsInfo.push({
               newTopicId: topic.topicId,
               originalTopicId: topic.topicId,
               subtopics: (topic.subtopics || []).map(s => ({
                 newSubtopicId: s.subtopicId,
-                originalSubtopicId: s.subtopicId,
+                originalSubtopicId: s.originalSubtopicId || s.subtopicId,
                 isCloned: !!s.cloneId
               }))
             });
             
-            changes.push({
-              type: 'topic',
-              id: topic.topicId,
-              originalId: topic.topicId,
-              data: {
-                name: topic.name,
-                description: null
-              },
-              syncToOriginal: true
-            });
+            if (topic.cloneId) {
+              changes.push({
+                type: 'topic',
+                id: topic.topicId,
+                originalId: topic.topicId,
+                data: {
+                  name: topic.name,
+                  description: null
+                },
+                syncToOriginal: true
+              });
+            }
             
             for (const subtopic of (topic.subtopics || [])) {
               if (subtopic.cloneId) {
@@ -464,8 +479,19 @@ export default function AuthorBooksPage() {
         loading={loading}
         allBooks={allBooks}
         currentBookId={bookManagement.currentBookId}
+        selectedSourceBookForSubtopic={selectedSourceBookForSubtopic}
+        availableTopicsForSubtopic={availableTopicsForSubtopic}
+        selectedSourceTopic={selectedSourceTopic}
+        availableSubtopics={availableSubtopics}
+        selectedSubtopics={selectedSubtopics}
+        subtopicTitles={subtopicTitles}
         onClose={handleCloseCloneSubtopicModal}
-        onSave={() => {/* Handler would be added from clone management */}}
+        onSourceBookChange={handleSourceBookChangeForSubtopic}
+        onSourceTopicChange={handleSourceTopicChange}
+        onSubtopicSelection={handleSubtopicSelection}
+        onSelectAllSubtopics={handleSelectAllSubtopics}
+        onSubtopicTitleChange={(subtopicId, value) => setSubtopicTitles(prev => ({ ...prev, [subtopicId]: value }))}
+        onSave={handleCloneSubtopicsSave}
       />
 
       <SyncModal

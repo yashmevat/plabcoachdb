@@ -103,7 +103,7 @@ export async function POST(req) {
     const authorId = decoded.userId;
     const userRole = decoded.role_id;
 
-    const { name, description, book_id, topic_id } = await req.json();
+    const { name, description, book_id, topic_id, clone_id } = await req.json();
 
     // Validation
     if (!name || !book_id || !topic_id) {
@@ -143,7 +143,7 @@ export async function POST(req) {
     }
 
    
-    const cloneId = Date.now().toString();
+    const cloneId = clone_id || Date.now().toString();
 
     // Get the next sort_order for this topic (max + 1, or 1 if none exist)
     const [maxOrder] = await pool.query(

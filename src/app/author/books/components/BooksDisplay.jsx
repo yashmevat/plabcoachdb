@@ -1,6 +1,6 @@
 // components/BooksDisplay.jsx
 'use client';
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import Link from 'next/link';
 
 export default function BooksDisplay({ books, searchTerm, onEdit, onDelete }) {
@@ -52,8 +52,8 @@ export default function BooksDisplay({ books, searchTerm, onEdit, onDelete }) {
                 </tr>
               ) : (
                 filteredBooks.map((book) => (
-                  <>
-                    <tr key={book.id} className="hover:bg-gray-50 transition">
+                  <Fragment key={book.id}>
+                    <tr className="hover:bg-gray-50 transition">
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-3">
                           <button
@@ -124,8 +124,8 @@ export default function BooksDisplay({ books, searchTerm, onEdit, onDelete }) {
                     {/* Expanded Topics Rows */}
                     {expandedBooks[book.id] && book.topics && book.topics.length > 0 && (
                       book.topics.map((topic, idx) => (
-                        <>
-                          <tr key={`topic-${topic.id}`} className="bg-gray-50">
+                        <Fragment key={`topic-${topic.id}`}>
+                          <tr className="bg-gray-50">
                             <td className="px-6 py-3" colSpan="2">
                               <div className="flex items-center gap-3 ml-12">
                                 <button
@@ -180,10 +180,10 @@ export default function BooksDisplay({ books, searchTerm, onEdit, onDelete }) {
                               </tr>
                             ))
                           )}
-                        </>
+                        </Fragment>
                       ))
                     )}
-                  </>
+                  </Fragment>
                 ))
               )}
             </tbody>
