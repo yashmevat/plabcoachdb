@@ -1398,9 +1398,12 @@ if (loading) {
 .book-content-text img {
     border-radius: 0px !important;
     max-width: 100%;
-    height: auto;
+    height: auto !important;
     margin: 1em auto;
     display: block;
+    /* Scale images proportionally with the font-size slider */
+    zoom: var(--font-scale, 1);
+    transform-origin: left top;
 }
 
 .book-content-text ul, .book-content-text ol {

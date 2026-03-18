@@ -153,6 +153,71 @@ export default function TopicPagesPage() {
     });
   };
 
+  const registerQuillFormats = () => {
+    if (!window.Quill || window.__pagesPageFormatsRegistered) return;
+
+    const Parchment = window.Quill.import('parchment');
+    const FontStyle = window.Quill.import('attributors/style/font');
+    const SizeStyle = window.Quill.import('attributors/style/size');
+    const AlignStyle = window.Quill.import('attributors/style/align');
+    const BackgroundStyle = window.Quill.import('attributors/style/background');
+    const ColorStyle = window.Quill.import('attributors/style/color');
+    const DirectionStyle = window.Quill.import('attributors/style/direction');
+
+    FontStyle.whitelist = null;
+    SizeStyle.whitelist = null;
+
+    const LineHeightStyle = new Parchment.Attributor.Style('lineheight', 'line-height', {
+      scope: Parchment.Scope.BLOCK,
+    });
+    const LetterSpacingStyle = new Parchment.Attributor.Style('letterspacing', 'letter-spacing', {
+      scope: Parchment.Scope.INLINE,
+    });
+    const FontWeightStyle = new Parchment.Attributor.Style('fontweight', 'font-weight', {
+      scope: Parchment.Scope.INLINE,
+    });
+    const MarginTopStyle = new Parchment.Attributor.Style('margintop', 'margin-top', {
+      scope: Parchment.Scope.BLOCK,
+    });
+    const MarginBottomStyle = new Parchment.Attributor.Style('marginbottom', 'margin-bottom', {
+      scope: Parchment.Scope.BLOCK,
+    });
+    const MarginLeftStyle = new Parchment.Attributor.Style('marginleft', 'margin-left', {
+      scope: Parchment.Scope.BLOCK,
+    });
+    const MarginRightStyle = new Parchment.Attributor.Style('marginright', 'margin-right', {
+      scope: Parchment.Scope.BLOCK,
+    });
+    const TextIndentStyle = new Parchment.Attributor.Style('textindent', 'text-indent', {
+      scope: Parchment.Scope.BLOCK,
+    });
+
+    window.Quill.register(FontStyle, true);
+    window.Quill.register(SizeStyle, true);
+    window.Quill.register(AlignStyle, true);
+    window.Quill.register(BackgroundStyle, true);
+    window.Quill.register(ColorStyle, true);
+    window.Quill.register(DirectionStyle, true);
+    window.Quill.register(LineHeightStyle, true);
+    window.Quill.register(LetterSpacingStyle, true);
+    window.Quill.register(FontWeightStyle, true);
+    window.Quill.register(MarginTopStyle, true);
+    window.Quill.register(MarginBottomStyle, true);
+    window.Quill.register(MarginLeftStyle, true);
+    window.Quill.register(MarginRightStyle, true);
+    window.Quill.register(TextIndentStyle, true);
+
+    window.__pagesPageFormatsRegistered = true;
+  };
+
+  const normalizePastedWhitespace = (text) => {
+    if (!text) return text;
+
+    return text
+      .replace(/\t/g, '    ')
+      .replace(/ {2,}/g, (spaces) => ` ${'\u00A0'.repeat(spaces.length - 1)}`);
+  };
+
  useEffect(() => {
   const loadQuill = async () => {
     // Load Quill CSS
@@ -166,6 +231,8 @@ export default function TopicPagesPage() {
     script.src = 'https://cdn.quilljs.com/1.3.6/quill.js';
     
     script.onload = () => {
+      registerQuillFormats();
+
       // Load Image Resize Module
       const resizeScript = document.createElement('script');
       resizeScript.src = 'https://unpkg.com/quill-image-resize-module@3.0.0/image-resize.min.js';
@@ -501,7 +568,7 @@ export default function TopicPagesPage() {
   },
 
         clipboard: {
-          matchVisual: false
+          matchVisual: true
         }
       },
       placeholder: 'Start typing or paste content...'
@@ -516,6 +583,22 @@ export default function TopicPagesPage() {
     // Debouncing ensures only one reflow fires after the full paste lands,
     // preventing race conditions that cause empty/duplicated pages.
     let pasteReflowTimeout = null;
+    quill.clipboard.addMatcher(Node.TEXT_NODE, (node, delta) => {
+      const Delta = window.Quill.import('delta');
+      const normalizedDelta = new Delta();
+
+      delta.ops.forEach((op) => {
+        if (typeof op.insert === 'string') {
+          normalizedDelta.insert(normalizePastedWhitespace(op.insert), op.attributes);
+          return;
+        }
+
+        normalizedDelta.insert(op.insert, op.attributes);
+      });
+
+      return normalizedDelta;
+    });
+
     quill.clipboard.addMatcher(Node.ELEMENT_NODE, (node, delta) => {
       if (pasteReflowTimeout) clearTimeout(pasteReflowTimeout);
       pasteReflowTimeout = setTimeout(async () => {
@@ -1167,9 +1250,6 @@ export default function TopicPagesPage() {
         }
 
         .ql-container {
-          font-size: 16px !important;
-          line-height: 1.6 !important;
-          font-family: Arial, sans-serif !important;
           height: ${CONTENT_HEIGHT}px !important;
           flex: none !important;
           border: none !important;
@@ -1181,6 +1261,12 @@ export default function TopicPagesPage() {
           overflow-y: auto !important;
           height: 100% !important;
           box-sizing: border-box !important;
+          font-size: 16px;
+          line-height: 1.55;
+          font-family: 'Times New Roman', Times, serif;
+          white-space: pre-wrap;
+          tab-size: 4;
+          -moz-tab-size: 4;
         }
 
         .page-footer {
@@ -1195,19 +1281,52 @@ export default function TopicPagesPage() {
         }
 
         .ql-editor p {
-          margin-bottom: 0.8em;
           margin-top: 0;
+          margin-bottom: 1em;
         }
 
         .ql-editor h1,
         .ql-editor h2,
+        .ql-editor h3,
+        .ql-editor h4,
+        .ql-editor h5,
+        .ql-editor h6 {
+          margin-top: 0.67em;
+          margin-bottom: 0.67em;
+          font-weight: 700;
+          line-height: 1.2;
+        }
+
+        .ql-editor h1 {
+          font-size: 2em;
+        }
+
+        .ql-editor h2 {
+          font-size: 1.5em;
+        }
+
         .ql-editor h3 {
-          margin-bottom: 0.6em;
-          margin-top: 0.6em;
+          font-size: 1.17em;
         }
 
         .ql-editor ul, .ql-editor ol {
-          margin-bottom: 0.8em;
+          margin-top: 0;
+          margin-bottom: 1em;
+        }
+
+        .ql-editor li,
+        .ql-editor blockquote,
+        .ql-editor pre {
+          line-height: 1.55;
+        }
+
+        .ql-editor *[style] {
+          line-height: unset;
+        }
+
+        .ql-editor pre,
+        .ql-editor code {
+          font-family: 'Courier New', Courier, monospace;
         }
 
         /* Saved pages default text color */
